@@ -2,6 +2,7 @@ from rest_framework import serializers
 from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
 from .models import User
+from .constants import ErrorMessages
 
 
 class UserRegistrationSerializer(serializers.ModelSerializer):
@@ -11,7 +12,7 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         validators=[validate_password],
         min_length=8,
         error_messages={
-            'min_length': '密码长度不能少于8个字符'
+            'min_length': ErrorMessages.PASSWORD_TOO_WEAK
         }
     )
     password_confirm = serializers.CharField(write_only=True)
@@ -23,13 +24,13 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
     def validate_email(self, value):
         """验证邮箱是否已存在"""
         if User.objects.filter(email=value).exists():
-            raise serializers.ValidationError('该邮箱已被注册')
+            raise serializers.ValidationError(ErrorMessages.EMAIL_ALREADY_EXISTS)
         return value
 
     def validate(self, attrs):
         """验证两次密码是否一致"""
         if attrs['password'] != attrs['password_confirm']:
-            raise serializers.ValidationError({'password_confirm': '两次输入的密码不一致'})
+            raise serializers.ValidationError({'password_confirm': ErrorMessages.PASSWORD_INCORRECT})
         return attrs
 
     def create(self, validated_data):
@@ -57,15 +58,15 @@ class UserLoginSerializer(serializers.Serializer):
             )
 
             if not user:
-                raise serializers.ValidationError('邮箱或密码错误')
+                raise serializers.ValidationError(ErrorMessages.INVALID_CREDENTIALS)
 
             if not user.is_active:
-                raise serializers.ValidationError('该账号已被禁用')
+                raise serializers.ValidationError(ErrorMessages.USER_NOT_FOUND)
 
             attrs['user'] = user
             return attrs
         else:
-            raise serializers.ValidationError('请提供邮箱和密码')
+            raise serializers.ValidationError(ErrorMessages.BAD_REQUEST)
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
