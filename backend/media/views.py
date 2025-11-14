@@ -118,8 +118,21 @@ class MediaViewSet(viewsets.GenericViewSet):
                 status_code=status.HTTP_201_CREATED
             )
         except Exception as e:
-            # 对于文件上传相关的错误，抛出自定义异常
-            raise FileUploadException("媒体文件上传失败")
+            # 对于文件上传相关的错误，记录实际错误信息并抛出更详细的异常
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"文件上传失败: {str(e)}", exc_info=True)
+            
+            # 根据错误类型返回不同的错误信息
+            error_message = str(e)
+            if "file_type" in error_message.lower() or "extension" in error_message.lower():
+                raise FileUploadException("不支持的文件类型")
+            elif "size" in error_message.lower() or "too large" in error_message.lower():
+                raise FileUploadException("文件大小超出限制")
+            elif "permission" in error_message.lower():
+                raise FileUploadException("文件权限不足")
+            else:
+                raise FileUploadException(f"媒体文件上传失败: {str(e)}")
 
     @action(detail=True, methods=['post'], url_path='update')
     def update_media(self, request, pk=None):
@@ -254,47 +267,20 @@ class MediaViewSet(viewsets.GenericViewSet):
 class CategoryViewSet(viewsets.ModelViewSet):
     """分类管理 ViewSet"""
     permission_classes = [permissions.IsAuthenticated]
-    queryset = Category.objects.all()
     serializer_class = CategorySerializer
 
     def get_queryset(self):
         """获取当前用户的分类"""
         return Category.objects.filter(user=self.request.user)
 
-    def list(self, request):
-        """获取用户的分类列表"""
-        queryset = self.get_queryset()
-        serializer = self.get_serializer(queryset, many=True)
-        return success_response(
-            data=serializer.data,
-            message='获取分类列表成功'
-        )
+    def perform_create(self, serializer):
+        """创建分类时设置用户"""
+        serializer.save(user=self.request.user)
 
-    def retrieve(self, request, pk=None):
-        """获取特定分类详情"""
-        try:
-            category = self.get_queryset().get(pk=pk)
-        except Category.DoesNotExist:
-            raise FolderNotFoundException("分类不存在")
-
-        serializer = self.get_serializer(category)
-        return success_response(
-            data=serializer.data,
-            message='获取分类详情成功'
-        )
-
-    def create(self, request):
+    def create(self, request, *args, **kwargs):
         """创建分类"""
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-
         try:
-            category = serializer.save(user=request.user)
-            return success_response(
-                data=serializer.data,
-                message='分类创建成功',
-                status_code=status.HTTP_201_CREATED
-            )
+            return super().create(request, *args, **kwargs)
         except Exception as e:
             # 处理数据库唯一约束错误
             if "UNIQUE constraint failed" in str(e) and "media_category.user_id, media_category.name" in str(e):
@@ -307,11 +293,33 @@ class CategoryViewSet(viewsets.ModelViewSet):
             # 重新抛出其他异常
             raise
 
+    def list(self, request, *args, **kwargs):
+        """获取分类列表，返回标准响应格式"""
+        queryset = self.filter_queryset(self.get_queryset())
+        serializer = self.get_serializer(queryset, many=True)
+        return success_response(
+            data=serializer.data,
+            message='获取分类列表成功'
+        )
+
+    def retrieve(self, request, *args, **kwargs):
+        """获取分类详情，返回标准响应格式"""
+        try:
+            instance = self.get_object()
+        except Category.DoesNotExist:
+            raise FolderNotFoundException("分类不存在")
+
+        serializer = self.get_serializer(instance)
+        return success_response(
+            data=serializer.data,
+            message='获取分类详情成功'
+        )
+
     @action(detail=True, methods=['post'], url_path='update')
     def update_category(self, request, pk=None):
         """更新分类"""
         try:
-            category = self.get_queryset().get(pk=pk)
+            category = self.get_object()
         except Category.DoesNotExist:
             raise FolderNotFoundException("分类不存在")
 
@@ -328,7 +336,7 @@ class CategoryViewSet(viewsets.ModelViewSet):
     def delete_category(self, request, pk=None):
         """删除分类"""
         try:
-            category = self.get_queryset().get(pk=pk)
+            category = self.get_object()
         except Category.DoesNotExist:
             raise FolderNotFoundException("分类不存在")
 
@@ -425,3 +433,194 @@ class TagViewSet(viewsets.ModelViewSet):
             message='标签删除成功',
             data=None
         )
+
+    # ============ 批量操作 ============
+
+    @action(detail=False, methods=['post'], url_path='batch-delete')
+    def batch_delete(self, request):
+        """批量删除媒体文件"""
+        ids = request.data.get('ids', [])
+        if not ids:
+            return error_response(
+                message='请提供要删除的文件ID列表',
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            # 获取当前用户的媒体文件
+            media_files = Media.objects.filter(
+                user=request.user,
+                id__in=ids
+            )
+
+            if len(media_files) != len(ids):
+                return error_response(
+                    message='部分文件不存在或无权访问',
+                    status_code=status.HTTP_404_NOT_FOUND
+                )
+
+            # 批量删除
+            deleted_count, _ = media_files.delete()
+
+            return success_response(
+                message=f'成功删除 {deleted_count} 个文件',
+                data={'deleted_count': deleted_count}
+            )
+
+        except Exception as e:
+            return error_response(
+                message=f'批量删除失败: {str(e)}',
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=False, methods=['post'], url_path='batch-update-categories')
+    def batch_update_categories(self, request):
+        """批量更新媒体文件的分类"""
+        ids = request.data.get('ids', [])
+        category_ids = request.data.get('category_ids', [])
+
+        if not ids:
+            return error_response(
+                message='请提供要更新的文件ID列表',
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            # 获取当前用户的媒体文件
+            media_files = Media.objects.filter(
+                user=request.user,
+                id__in=ids
+            )
+
+            if len(media_files) != len(ids):
+                return error_response(
+                    message='部分文件不存在或无权访问',
+                    status_code=status.HTTP_404_NOT_FOUND
+                )
+
+            # 获取分类
+            categories = Category.objects.filter(
+                user=request.user,
+                id__in=category_ids
+            )
+
+            # 批量更新分类
+            for media in media_files:
+                media.categories.set(categories)
+
+            return success_response(
+                message=f'成功为 {len(media_files)} 个文件更新分类',
+                data={'updated_count': len(media_files)}
+            )
+
+        except Exception as e:
+            return error_response(
+                message=f'批量更新分类失败: {str(e)}',
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=False, methods=['post'], url_path='batch-add-tags')
+    def batch_add_tags(self, request):
+        """批量为媒体文件添加标签"""
+        ids = request.data.get('ids', [])
+        tag_ids = request.data.get('tag_ids', [])
+
+        if not ids or not tag_ids:
+            return error_response(
+                message='请提供文件ID列表和标签ID列表',
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            # 获取当前用户的媒体文件
+            media_files = Media.objects.filter(
+                user=request.user,
+                id__in=ids
+            )
+
+            if len(media_files) != len(ids):
+                return error_response(
+                    message='部分文件不存在或无权访问',
+                    status_code=status.HTTP_404_NOT_FOUND
+                )
+
+            # 获取标签
+            tags = Tag.objects.filter(
+                user=request.user,
+                id__in=tag_ids
+            )
+
+            if len(tags) != len(tag_ids):
+                return error_response(
+                    message='部分标签不存在',
+                    status_code=status.HTTP_404_NOT_FOUND
+                )
+
+            # 批量添加标签
+            for media in media_files:
+                # 添加新标签，保留已有标签
+                media.tags.add(*tags)
+
+            return success_response(
+                message=f'成功为 {len(media_files)} 个文件添加标签',
+                data={'updated_count': len(media_files)}
+            )
+
+        except Exception as e:
+            return error_response(
+                message=f'批量添加标签失败: {str(e)}',
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=False, methods=['post'], url_path='batch-remove-tags')
+    def batch_remove_tags(self, request):
+        """批量从媒体文件移除标签"""
+        ids = request.data.get('ids', [])
+        tag_ids = request.data.get('tag_ids', [])
+
+        if not ids or not tag_ids:
+            return error_response(
+                message='请提供文件ID列表和标签ID列表',
+                status_code=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            # 获取当前用户的媒体文件
+            media_files = Media.objects.filter(
+                user=request.user,
+                id__in=ids
+            )
+
+            if len(media_files) != len(ids):
+                return error_response(
+                    message='部分文件不存在或无权访问',
+                    status_code=status.HTTP_404_NOT_FOUND
+                )
+
+            # 获取标签
+            tags = Tag.objects.filter(
+                user=request.user,
+                id__in=tag_ids
+            )
+
+            if len(tags) != len(tag_ids):
+                return error_response(
+                    message='部分标签不存在',
+                    status_code=status.HTTP_404_NOT_FOUND
+                )
+
+            # 批量移除标签
+            for media in media_files:
+                # 移除指定标签
+                media.tags.remove(*tags)
+
+            return success_response(
+                message=f'成功从 {len(media_files)} 个文件移除标签',
+                data={'updated_count': len(media_files)}
+            )
+
+        except Exception as e:
+            return error_response(
+                message=f'批量移除标签失败: {str(e)}',
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )

@@ -31,6 +31,28 @@ const data = {
       ],
     },
     {
+      title: "媒体管理",
+      url: "#",
+      items: [
+        {
+          title: "媒体文件",
+          url: "/dashboard/media",
+        },
+        {
+          title: "上传文件",
+          url: "/dashboard/media/upload",
+        },
+        {
+          title: "分类管理",
+          url: "/dashboard/media/categories",
+        },
+        {
+          title: "标签管理",
+          url: "/dashboard/media/tags",
+        },
+      ],
+    },
+    {
       title: "用户管理",
       url: "#",
       items: [

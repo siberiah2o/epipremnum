@@ -4,6 +4,12 @@ from django.db import models
 from django.contrib.auth import get_user_model
 from django.core.files.storage import default_storage
 from django.utils import timezone
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+from django.core.files import File
+from io import BytesIO
+from PIL import Image
+import tempfile
 
 User = get_user_model()
 
@@ -31,8 +37,8 @@ def user_media_path(instance, filename):
 
 def thumbnail_path(instance, filename):
     """
-    生成视频缩略图的存储路径
-    格式: media/videos/{user_id}/{year}/{month}/thumbnails/{uuid}_{ext}
+    生成缩略图的存储路径
+    格式: media/{file_type}/{user_id}/{year}/{month}/thumbnails/{uuid}_{ext}
     """
     now = timezone.now()
 
@@ -40,8 +46,11 @@ def thumbnail_path(instance, filename):
     file_extension = os.path.splitext(filename)[1]  # 获取文件扩展名
     unique_filename = f"{uuid.uuid4().hex}{file_extension}"  # 使用UUID生成唯一文件名
 
+    # 根据媒体文件类型选择目录
+    file_type = 'images' if instance.file_type == 'image' else 'videos'
+
     return os.path.join(
-        'videos',
+        file_type,
         str(instance.user.id),
         str(now.year),
         str(now.month),
@@ -112,21 +121,37 @@ class Media(models.Model):
         return f"{self.user.username} - {self.title or self.file.name}"
 
     def save(self, *args, **kwargs):
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        logger.info(f"保存媒体文件: {self.file.name if self.file else 'None'}")
+        
         # 保存文件大小
         if self.file and not self.file_size:
             self.file_size = self.file.size
+            logger.info(f"设置文件大小: {self.file_size}")
         
         # 根据文件扩展名自动设置文件类型
         if self.file and not self.file_type:
             file_extension = os.path.splitext(self.file.name)[1].lower()
+            logger.info(f"文件扩展名: {file_extension}")
+            
             if file_extension in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']:
                 self.file_type = 'image'
+                logger.info("设置文件类型: image")
             elif file_extension in ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm']:
                 self.file_type = 'video'
+                logger.info("设置文件类型: video")
             else:
+                logger.error(f"不支持的文件类型: {file_extension}")
                 raise ValueError('不支持的文件类型')
 
-        super().save(*args, **kwargs)
+        try:
+            super().save(*args, **kwargs)
+            logger.info("媒体文件保存成功")
+        except Exception as e:
+            logger.error(f"保存媒体文件失败: {str(e)}")
+            raise
 
     def delete(self, *args, **kwargs):
         # 删除文件和缩略图
@@ -140,6 +165,95 @@ class Media(models.Model):
         
         super().delete(*args, **kwargs)
 
+    def generate_thumbnail(self):
+        """生成缩略图"""
+        if self.file_type == 'image':
+            self._generate_image_thumbnail()
+        elif self.file_type == 'video':
+            self._generate_video_thumbnail()
+
+    def _generate_image_thumbnail(self):
+        """为图片生成缩略图"""
+        try:
+            # 打开原始图片
+            with Image.open(self.file.path) as img:
+                # 转换为RGB模式（如果是RGBA或其他模式）
+                if img.mode in ('RGBA', 'LA', 'P'):
+                    background = Image.new('RGB', img.size, (255, 255, 255))
+                    background.paste(img, mask=img.split()[-1] if img.mode == 'RGBA' else None)
+                    img = background
+
+                # 设置缩略图尺寸
+                img.thumbnail((300, 300), Image.Resampling.LANCZOS)
+
+                # 创建临时文件
+                with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as temp_file:
+                    img.save(temp_file, 'JPEG', quality=85, optimize=True)
+                    temp_path = temp_file.name
+
+                # 保存缩略图
+                with open(temp_path, 'rb') as temp_file:
+                    thumbnail_name = f"thumb_{self.file.name.split('/')[-1].split('.')[0]}.jpg"
+                    self.thumbnail.save(thumbnail_name, File(temp_file), save=False)
+
+                # 删除临时文件
+                os.unlink(temp_path)
+
+        except Exception as e:
+            print(f"图片缩略图生成失败: {e}")
+            # 如果生成失败，不保存缩略图
+
+    def _generate_video_thumbnail(self):
+        """为视频生成缩略图"""
+        try:
+            import cv2
+
+            # 打开视频文件
+            video_path = self.file.path
+            cap = cv2.VideoCapture(video_path)
+
+            if not cap.isOpened():
+                print(f"无法打开视频文件: {video_path}")
+                return
+
+            # 跳到第1秒的位置
+            cap.set(cv2.CAP_PROP_POS_FRAMES, cap.get(cv2.CAP_PROP_FPS) * 1)
+
+            # 读取帧
+            ret, frame = cap.read()
+
+            if ret:
+                # 转换为RGB
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+                # 转换为PIL Image
+                img = Image.fromarray(frame_rgb)
+
+                # 调整尺寸为16:9比例
+                target_width = 300
+                target_height = 169  # 16:9 比例
+                img = img.resize((target_width, target_height), Image.Resampling.LANCZOS)
+
+                # 创建临时文件
+                with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as temp_file:
+                    img.save(temp_file, 'JPEG', quality=85, optimize=True)
+                    temp_path = temp_file.name
+
+                # 保存缩略图
+                with open(temp_path, 'rb') as temp_file:
+                    thumbnail_name = f"thumb_{self.file.name.split('/')[-1].split('.')[0]}.jpg"
+                    self.thumbnail.save(thumbnail_name, File(temp_file), save=False)
+
+                # 删除临时文件
+                os.unlink(temp_path)
+
+            cap.release()
+
+        except ImportError:
+            print("OpenCV未安装，无法生成视频缩略图")
+        except Exception as e:
+            print(f"视频缩略图生成失败: {e}")
+
     @property
     def file_url(self):
         """获取文件URL"""
@@ -149,3 +263,19 @@ class Media(models.Model):
     def thumbnail_url(self):
         """获取缩略图URL"""
         return self.thumbnail.url if self.thumbnail else None
+
+
+# 信号处理器：在Media文件保存后自动生成缩略图
+@receiver(post_save, sender=Media)
+def generate_media_thumbnail(sender, instance, created, **kwargs):
+    """
+    Media文件保存后自动生成缩略图
+    只在文件首次创建时生成缩略图，避免重复生成
+    """
+    if created and instance.file:
+        try:
+            instance.generate_thumbnail()
+            # 保存缩略图，但不触发新的信号
+            Media.objects.filter(pk=instance.pk).update(thumbnail=instance.thumbnail)
+        except Exception as e:
+            print(f"自动生成缩略图失败: {e}")
