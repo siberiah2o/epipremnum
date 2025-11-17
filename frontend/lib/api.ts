@@ -1,4 +1,5 @@
 // API 客户端配置和类型定义
+import { convertMediaUrls, convertMediaListUrls } from './media-utils';
 
 export interface ApiResponse<T = any> {
   code: number;
@@ -174,8 +175,10 @@ export interface BatchRemoveTagsData {
 }
 
 // API 基础配置
+// 在开发环境中使用相对路径，通过 Next.js 代理访问后端
+// 在生产环境中可以使用环境变量配置完整的后端URL
 const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL || "http://192.168.55.133:8888";
+  process.env.NEXT_PUBLIC_API_BASE_URL || "";
 
 class ApiClient {
   private baseURL: string;
@@ -584,6 +587,8 @@ class ApiClient {
             );
           }
 
+          // 转换媒体文件URL
+          retryData.data = convertMediaUrls(retryData.data);
           return retryData;
         } catch (refreshError) {
           // 刷新失败，清除 tokens
@@ -597,6 +602,8 @@ class ApiClient {
         throw new Error(responseData.message || `请求失败: ${response.status}`);
       }
 
+      // 转换媒体文件URL
+      responseData.data = convertMediaUrls(responseData.data);
       return responseData;
     } catch (error) {
       clearTimeout(timeoutId);
@@ -638,12 +645,26 @@ class ApiClient {
       params.append("file_type", fileType);
     }
 
-    return this.request<PaginatedMediaList>(`/api/media/?${params}`);
+    const response = await this.request<PaginatedMediaList>(`/api/media/?${params}`);
+
+    // 转换媒体文件列表URL
+    if (response.data && response.data.results) {
+      response.data.results = convertMediaListUrls(response.data.results);
+    }
+
+    return response;
   }
 
   // 获取特定媒体文件详情
   async getMedia(id: number): Promise<ApiResponse<MediaFile>> {
-    return this.request<MediaFile>(`/api/media/${id}/`);
+    const response = await this.request<MediaFile>(`/api/media/${id}/`);
+
+    // 转换媒体文件URL
+    if (response.data) {
+      response.data = convertMediaUrls(response.data);
+    }
+
+    return response;
   }
 
   // 更新媒体文件信息
@@ -651,10 +672,17 @@ class ApiClient {
     id: number,
     data: UpdateMediaData
   ): Promise<ApiResponse<MediaFile>> {
-    return this.request<MediaFile>(`/api/media/${id}/update/`, {
+    const response = await this.request<MediaFile>(`/api/media/${id}/update/`, {
       method: "POST",
       body: JSON.stringify(data),
     });
+
+    // 转换媒体文件URL
+    if (response.data) {
+      response.data = convertMediaUrls(response.data);
+    }
+
+    return response;
   }
 
   // 删除媒体文件

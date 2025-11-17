@@ -17,20 +17,19 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Button } from "@/components/ui/button"
-import { MediaList } from "@/components/media"
-import { MediaEdit } from "@/components/media"
+import { MediaList, MediaEdit, MediaPreviewDialog } from "@/components/media"
 import { MediaListItem } from "@/lib/api"
-import { FileIcon } from "@/components/ui/file-icon"
-import { isPreviewable } from "@/lib/file-utils"
+import { useMediaList } from '@/hooks/use-media'
+import { FileImage, Upload } from 'lucide-react'
 import { toast } from 'sonner'
-import { FileImage, Upload, Download } from 'lucide-react'
 
 export default function MediaPage() {
   const [editingMedia, setEditingMedia] = useState<MediaListItem | null>(null)
   const [viewingMedia, setViewingMedia] = useState<MediaListItem | null>(null)
   const [activeTab, setActiveTab] = useState('list')
+
+  // 获取媒体列表数据用于预览切换
+  const { mediaList, isLoading } = useMediaList()
 
   const handleEdit = (media: MediaListItem) => {
     setEditingMedia(media)
@@ -45,22 +44,8 @@ export default function MediaPage() {
     setViewingMedia(null)
   }
 
-  const handleDownload = async (media: MediaListItem) => {
-    try {
-      const response = await fetch(media.file_url)
-      const blob = await response.blob()
-      const url = window.URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = media.title
-      document.body.appendChild(a)
-      a.click()
-      window.URL.revokeObjectURL(url)
-      document.body.removeChild(a)
-      toast.success('文件下载开始')
-    } catch (error) {
-      toast.error('下载失败')
-    }
+  const handleMediaChange = (media: MediaListItem) => {
+    setViewingMedia(media)
   }
 
   const handleEditSuccess = () => {
@@ -105,12 +90,7 @@ export default function MediaPage() {
           </Breadcrumb>
         </header>
         <div className="flex flex-1 flex-col gap-4 p-4">
-          <div className="flex items-center justify-between">
-            <p className="text-muted-foreground">
-              管理您的媒体文件，包括上传、编辑和组织
-            </p>
-          </div>
-
+  
           <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
             <TabsList>
               <TabsTrigger value="list" className="flex items-center gap-2">
@@ -141,63 +121,13 @@ export default function MediaPage() {
           </Tabs>
 
         {/* 预览对话框 */}
-        <Dialog open={!!viewingMedia} onOpenChange={(open) => !open && handleViewClose()}>
-          <DialogContent className="max-w-4xl">
-            <DialogHeader>
-              <DialogTitle>{viewingMedia?.title}</DialogTitle>
-              <DialogDescription>
-                媒体文件预览
-              </DialogDescription>
-            </DialogHeader>
-            {viewingMedia && (
-              <div className="space-y-4">
-                {isPreviewable(viewingMedia.file_type) ? (
-                  viewingMedia.file_type === 'image' ? (
-                    <img
-                      src={viewingMedia.file_url}
-                      alt={viewingMedia.title}
-                      className="w-full max-h-96 object-contain rounded"
-                    />
-                  ) : (
-                    <video
-                      src={viewingMedia.file_url}
-                      controls
-                      className="w-full max-h-96 rounded"
-                    />
-                  )
-                ) : (
-                  <div className="flex flex-col items-center justify-center py-12 border-2 border-dashed border-muted-foreground/25 rounded-lg">
-                    <FileIcon mimeType={viewingMedia.file_type} size="lg" className="mb-4 text-muted-foreground" />
-                    <p className="text-muted-foreground mb-2">此文件类型不支持预览</p>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleDownload(viewingMedia)}
-                      className="mt-4"
-                    >
-                      <Download className="h-4 w-4 mr-2" />
-                      下载文件
-                    </Button>
-                  </div>
-                )}
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <span className="font-medium">文件类型:</span> {viewingMedia.file_type === 'image' ? '图片' : '视频'}
-                  </div>
-                  <div>
-                    <span className="font-medium">文件格式:</span> {viewingMedia.file_url.split('.').pop()?.toUpperCase() || 'Unknown'}
-                  </div>
-                  <div>
-                    <span className="font-medium">文件大小:</span> {(viewingMedia.file_size / 1024 / 1024).toFixed(2)} MB
-                  </div>
-                  <div>
-                    <span className="font-medium">创建时间:</span> {new Date(viewingMedia.created_at).toLocaleString()}
-                  </div>
-                </div>
-              </div>
-            )}
-          </DialogContent>
-        </Dialog>
+        <MediaPreviewDialog
+          open={!!viewingMedia}
+          onOpenChange={(open) => !open && handleViewClose()}
+          media={viewingMedia}
+          mediaList={mediaList?.results || []}
+          onMediaChange={handleMediaChange}
+        />
       </div>
     </SidebarInset>
   </SidebarProvider>

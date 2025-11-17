@@ -11,6 +11,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from 'sonner'
 import {
   Search,
@@ -21,7 +22,9 @@ import {
   Calendar,
   HardDrive,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  LayoutGrid,
+  List
 } from 'lucide-react'
 import { MediaListItem, apiClient } from '@/lib/api'
 import { formatDistanceToNow } from 'date-fns'
@@ -40,6 +43,8 @@ export function MediaList({ onEdit, onView }: MediaListProps) {
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('')
   const [imageErrors, setImageErrors] = useState<Set<number>>(new Set())
   const [fallbackToOriginal, setFallbackToOriginal] = useState<Set<number>>(new Set())
+  const [viewMode, setViewMode] = useState<'list' | 'grid'>('list')
+  const [pageSize, setPageSize] = useState(12)
 
   // 多选相关状态
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
@@ -49,7 +54,9 @@ export function MediaList({ onEdit, onView }: MediaListProps) {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [mediaToDelete, setMediaToDelete] = useState<MediaListItem | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
-  const pageSize = 12
+
+  // 每页显示行数选项
+  const pageSizeOptions = [8, 12, 16, 20, 24, 30, 40, 50]
 
   const { mediaList, isLoading, error, refetch } = useMediaList(
     currentPage,
@@ -67,6 +74,11 @@ export function MediaList({ onEdit, onView }: MediaListProps) {
     return () => clearTimeout(timer)
   }, [searchQuery])
 
+  // 分页大小改变时重置到第一页
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [pageSize])
+
   const handlePageChange = (page: number) => {
     setCurrentPage(page)
   }
@@ -74,6 +86,12 @@ export function MediaList({ onEdit, onView }: MediaListProps) {
   const handleSearchChange = useCallback((value: string) => {
     setSearchQuery(value)
   }, [])
+
+  const handlePageSizeChange = (newPageSize: string) => {
+    const size = parseInt(newPageSize)
+    setPageSize(size)
+    setCurrentPage(1) // 重置到第一页
+  }
 
   // 多选功能
   const toggleSelection = (id: number) => {
@@ -252,6 +270,139 @@ export function MediaList({ onEdit, onView }: MediaListProps) {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
   }
 
+  // 网格视图组件
+  const GridView = () => {
+    if (!mediaList?.results?.length) return null
+
+    return (
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
+        {mediaList.results.map((media) => (
+          <div
+            key={media.id}
+            className={`group relative bg-background border rounded-lg overflow-hidden hover:shadow-lg transition-all duration-200 ${
+              selectedIds.has(media.id) ? 'ring-2 ring-primary ring-offset-2' : ''
+            }`}
+          >
+            {/* 选择框 */}
+            <div className="absolute top-2 left-2 z-10">
+              <Checkbox
+                checked={selectedIds.has(media.id)}
+                onCheckedChange={() => toggleSelection(media.id)}
+                className="bg-background/80 backdrop-blur-sm"
+              />
+            </div>
+
+            {/* 操作按钮 */}
+            <div className="absolute top-2 right-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+              <div className="flex gap-1">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => onView?.(media)}
+                  className="h-8 w-8 p-0 bg-background/80 backdrop-blur-sm"
+                >
+                  <Eye className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => onEdit?.(media)}
+                  className="h-8 w-8 p-0 bg-background/80 backdrop-blur-sm"
+                >
+                  <Edit className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => handleDownload(media)}
+                  className="h-8 w-8 p-0 bg-background/80 backdrop-blur-sm"
+                >
+                  <Download className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => handleDeleteClick(media)}
+                  className="h-8 w-8 p-0 bg-background/80 backdrop-blur-sm"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+
+            {/* 媒体预览区域 */}
+            <div
+              className="aspect-square bg-muted/50 relative overflow-hidden cursor-pointer"
+              onClick={() => onView?.(media)}
+            >
+              {(media.file_type === 'image' || media.file_type === 'video') && (media.thumbnail_url || media.file_url) ? (
+                imageErrors.has(media.id) ? (
+                  <div className="w-full h-full flex items-center justify-center">
+                    <FileIcon mimeType={media.file_type === 'image' ? "image/jpeg" : "video/mp4"} size="lg" />
+                  </div>
+                ) : (
+                  <>
+                    {media.file_type === 'image' ? (
+                      <img
+                        src={getImageSrc(media) || undefined}
+                        alt={media.title}
+                        className="w-full h-full object-cover transition-transform group-hover:scale-105"
+                        onError={() => handleImageError(media)}
+                        loading="lazy"
+                      />
+                    ) : (
+                      <div className="relative w-full h-full">
+                        <img
+                          src={getImageSrc(media) || undefined}
+                          alt={media.title}
+                          className="w-full h-full object-cover"
+                          onError={() => handleImageError(media)}
+                          loading="lazy"
+                        />
+                        <div className="absolute inset-0 flex items-center justify-center">
+                          <div className="bg-black/50 rounded-full p-2">
+                            <FileIcon mimeType="video/mp4" size="sm" className="text-white" />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )
+              ) : (
+                <div className="w-full h-full flex items-center justify-center">
+                  <FileIcon mimeType={media.file_type === 'video' ? 'video/mp4' : 'application/octet-stream'} size="lg" />
+                </div>
+              )}
+            </div>
+
+            {/* 文件信息 */}
+            <div className="p-3">
+              <div className="mb-2">
+                <h4
+                  className="font-medium text-sm truncate cursor-pointer hover:text-primary transition-colors"
+                  onClick={() => onView?.(media)}
+                  title={media.title}
+                >
+                  {media.title}
+                </h4>
+                <div className="flex items-center gap-1 mt-1">
+                  <FileIcon mimeType={media.file_type} size="sm" />
+                  <Badge variant="outline" className="text-xs">
+                    {getFileTypeDisplayName(media.file_type)}
+                  </Badge>
+                </div>
+              </div>
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>{formatFileSize(media.file_size)}</span>
+                <span>{formatDistanceToNow(new Date(media.created_at), { addSuffix: true, locale: zhCN })}</span>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    )
+  }
+
   const totalPages = mediaList?.total_pages || 0
   const totalItems = mediaList?.count || 0
 
@@ -280,6 +431,23 @@ export function MediaList({ onEdit, onView }: MediaListProps) {
             </CardDescription>
           </div>
           <div className="flex items-center gap-2">
+            {/* 每页显示行数选择器 */}
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <span>每页:</span>
+              <Select value={pageSize.toString()} onValueChange={handlePageSizeChange}>
+                <SelectTrigger className="w-20 h-8">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {pageSizeOptions.map(size => (
+                    <SelectItem key={size} value={size.toString()}>
+                      {size}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
             {selectedIds.size > 0 && (
               <Button
                 variant="outline"
@@ -290,6 +458,24 @@ export function MediaList({ onEdit, onView }: MediaListProps) {
                 取消选择
               </Button>
             )}
+            <div className="flex items-center border rounded-md">
+              <Button
+                variant={viewMode === 'list' ? 'default' : 'ghost'}
+                size="sm"
+                onClick={() => setViewMode('list')}
+                className="h-8 px-3"
+              >
+                <List className="h-4 w-4" />
+              </Button>
+              <Button
+                variant={viewMode === 'grid' ? 'default' : 'ghost'}
+                size="sm"
+                onClick={() => setViewMode('grid')}
+                className="h-8 px-3"
+              >
+                <LayoutGrid className="h-4 w-4" />
+              </Button>
+            </div>
             <div className="relative">
               <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
@@ -304,24 +490,45 @@ export function MediaList({ onEdit, onView }: MediaListProps) {
       </CardHeader>
       <CardContent>
         {isLoading ? (
-          <div className="space-y-4">
-            {[...Array(5)].map((_, i) => (
-              <div key={i} className="flex items-center space-x-4">
-                <Skeleton className="h-12 w-12 rounded" />
-                <div className="space-y-2 flex-1">
-                  <Skeleton className="h-4 w-3/4" />
-                  <Skeleton className="h-4 w-1/2" />
+          viewMode === 'grid' ? (
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
+              {[...Array(pageSize)].map((_, i) => (
+                <div key={i} className="bg-background border rounded-lg overflow-hidden">
+                  <Skeleton className="aspect-square" />
+                  <div className="p-3 space-y-2">
+                    <Skeleton className="h-4 w-3/4" />
+                    <Skeleton className="h-3 w-1/2" />
+                    <div className="flex justify-between">
+                      <Skeleton className="h-3 w-12" />
+                      <Skeleton className="h-3 w-16" />
+                    </div>
+                  </div>
                 </div>
-                <Skeleton className="h-8 w-8" />
-                <Skeleton className="h-8 w-8" />
-                <Skeleton className="h-8 w-8" />
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {[...Array(5)].map((_, i) => (
+                <div key={i} className="flex items-center space-x-4">
+                  <Skeleton className="h-12 w-12 rounded" />
+                  <div className="space-y-2 flex-1">
+                    <Skeleton className="h-4 w-3/4" />
+                    <Skeleton className="h-4 w-1/2" />
+                  </div>
+                  <Skeleton className="h-8 w-8" />
+                  <Skeleton className="h-8 w-8" />
+                  <Skeleton className="h-8 w-8" />
+                </div>
+              ))}
+            </div>
+          )
         ) : (
           <>
-            {/* 表格视图 */}
-            <div className="rounded-md border">
+            {/* 根据视图模式显示 */}
+            {viewMode === 'grid' ? (
+              <GridView />
+            ) : (
+              <div className="rounded-md border">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -447,12 +654,13 @@ export function MediaList({ onEdit, onView }: MediaListProps) {
                 </TableBody>
               </Table>
             </div>
+            )}
 
             {/* 分页 */}
             {totalPages > 1 && (
               <div className="flex items-center justify-between mt-4">
                 <div className="text-sm text-muted-foreground">
-                  显示第 {(currentPage - 1) * pageSize + 1} - {Math.min(currentPage * pageSize, totalItems)} 条，共 {totalItems} 条
+                  第 {currentPage} 页，显示 {(currentPage - 1) * pageSize + 1} - {Math.min(currentPage * pageSize, totalItems)} 条，共 {totalItems} 条（每页 {pageSize} 条）
                 </div>
                 <div className="flex items-center gap-2">
                   <Button

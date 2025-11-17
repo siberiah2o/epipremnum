@@ -26,54 +26,74 @@ export function MediaUpload() {
     description: '',
     prompt: ''
   })
-  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([])
   const [selectedCategories, setSelectedCategories] = useState<string[]>([])
   const [selectedTags, setSelectedTags] = useState<string[]>([])
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [previewUrls, setPreviewUrls] = useState<Map<string, string>>(new Map())
   const [isDragging, setIsDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const handleFileSelect = useCallback((file: File) => {
-    try {
-      // 检查文件类型是否支持上传（与后端验证逻辑一致）
-      if (!isUploadable(file.name)) {
-        toast.error('不支持的文件类型。只支持图片(jpg, png, gif, bmp, webp)和视频(mp4, avi, mov, wmv, flv, webm)')
-        return
-      }
+  const handleFileSelect = useCallback((files: FileList | File[]) => {
+    const fileArray = Array.from(files)
+    const validFiles: File[] = []
+    const newPreviewUrls = new Map(previewUrls)
 
-      // 检查文件大小 (50MB)
-      if (file.size > 50 * 1024 * 1024) {
-        toast.error('文件大小不能超过 50MB')
-        return
-      }
-
-      setSelectedFile(file)
-      setFormData(prev => ({ ...prev, title: file.name.split('.')[0] }))
-
-      // 创建预览（仅图片类型）
-      const fileType = guessFileTypeFromFileName(file.name)
-      if (fileType === 'image') {
-        const reader = new FileReader()
-        reader.onload = (e) => {
-          setPreviewUrl(e.target?.result as string)
+    fileArray.forEach(file => {
+      try {
+        // 检查文件类型是否支持上传（与后端验证逻辑一致）
+        if (!isUploadable(file.name)) {
+          toast.error(`文件 "${file.name}" 不支持。只支持图片和视频文件`)
+          return
         }
-        reader.readAsDataURL(file)
-      } else {
-        setPreviewUrl(null)
+
+        // 检查文件大小 (50MB)
+        if (file.size > 50 * 1024 * 1024) {
+          toast.error(`文件 "${file.name}" 大小超过 50MB`)
+          return
+        }
+
+        // 检查是否已经选择过相同文件
+        if (selectedFiles.some(f => f.name === file.name && f.size === file.size)) {
+          toast.error(`文件 "${file.name}" 已经选择过了`)
+          return
+        }
+
+        validFiles.push(file)
+
+        // 创建预览（仅图片类型）
+        const fileType = guessFileTypeFromFileName(file.name)
+        if (fileType === 'image') {
+          const reader = new FileReader()
+          reader.onload = (e) => {
+            setPreviewUrls(prev => new Map(prev.set(file.name + file.size, e.target?.result as string)))
+          }
+          reader.readAsDataURL(file)
+        }
+      } catch (error) {
+        toast.error(`文件 "${file.name}" 验证失败`)
       }
-    } catch (error) {
-      toast.error('文件类型验证失败')
+    })
+
+    if (validFiles.length > 0) {
+      setSelectedFiles(prev => [...prev, ...validFiles])
+
+      // 如果是第一个文件，用它来设置默认标题
+      if (selectedFiles.length === 0 && validFiles.length > 0) {
+        setFormData(prev => ({ ...prev, title: validFiles[0].name.split('.')[0] }))
+      }
+
+      toast.success(`成功添加 ${validFiles.length} 个文件`)
     }
-  }, [])
+  }, [selectedFiles, previewUrls])
 
   const handleFileInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     console.log('File input change triggered', event.target.files)
-    const file = event.target.files?.[0]
-    if (file) {
-      console.log('File selected:', file.name)
-      handleFileSelect(file)
+    const files = event.target.files
+    if (files && files.length > 0) {
+      console.log('Files selected:', files.length)
+      handleFileSelect(files)
     } else {
-      console.log('No file selected')
+      console.log('No files selected')
     }
   }
 
@@ -93,22 +113,44 @@ export function MediaUpload() {
 
     const files = e.dataTransfer.files
     if (files.length > 0) {
-      handleFileSelect(files[0])
+      handleFileSelect(files)
     }
   }, [handleFileSelect])
 
-  const handleRemoveFile = () => {
-    console.log('Removing file')
-    setSelectedFile(null)
-    setPreviewUrl(null)
-    setFormData(prev => ({ ...prev, title: '' }))
+  const handleRemoveFile = (fileToRemove?: File) => {
+    if (fileToRemove) {
+      // 移除特定文件
+      setSelectedFiles(prev => {
+        const newFiles = prev.filter(f => !(f.name === fileToRemove.name && f.size === fileToRemove.size))
+
+        // 如果移除的是当前用于设置标题的文件，更新标题
+        if (prev[0]?.name === fileToRemove.name && prev[0]?.size === fileToRemove.size) {
+          if (newFiles.length > 0) {
+            setFormData(prev => ({ ...prev, title: newFiles[0].name.split('.')[0] }))
+          } else {
+            setFormData(prev => ({ ...prev, title: '' }))
+          }
+        }
+
+        return newFiles
+      })
+
+      // 移除对应的预览图
+      setPreviewUrls(prev => {
+        const newUrls = new Map(prev)
+        newUrls.delete(fileToRemove.name + fileToRemove.size)
+        return newUrls
+      })
+    } else {
+      // 清空所有文件
+      setSelectedFiles([])
+      setPreviewUrls(new Map())
+      setFormData(prev => ({ ...prev, title: '' }))
+    }
 
     // 清理文件输入
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
-      // 强制重新渲染input元素
-      const currentValue = fileInputRef.current.value
-      fileInputRef.current.value = currentValue
     }
   }
 
@@ -128,11 +170,12 @@ export function MediaUpload() {
     const input = document.createElement('input')
     input.type = 'file'
     input.accept = '.jpg,.jpeg,.png,.gif,.bmp,.webp,.mp4,.avi,.mov,.wmv,.flv,.webm'
+    input.multiple = true // 支持多选
     input.onchange = (e) => {
       const target = e.target as HTMLInputElement
-      const file = target.files?.[0]
-      if (file) {
-        handleFileSelect(file)
+      const files = target.files
+      if (files && files.length > 0) {
+        handleFileSelect(files)
       }
     }
     input.click()
@@ -157,7 +200,7 @@ export function MediaUpload() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    if (!selectedFile) {
+    if (selectedFiles.length === 0) {
       toast.error('请选择要上传的文件')
       return
     }
@@ -167,41 +210,58 @@ export function MediaUpload() {
       return
     }
 
-    // 调试信息
-    console.log('Uploading file:', selectedFile)
-    console.log('File type:', selectedFile?.constructor.name)
-    console.log('Upload data:', {
-      title: formData.title.trim(),
-      description: formData.description.trim(),
-      prompt: formData.prompt.trim(),
-      category_ids: selectedCategories.length > 0 ? selectedCategories.join(',') : undefined,
-      tag_ids: selectedTags.length > 0 ? selectedTags.join(',') : undefined
-    })
+    let successCount = 0
+    let failureCount = 0
+    const totalFiles = selectedFiles.length
 
-    const uploadData = {
-      file: selectedFile,
-      title: formData.title.trim(),
-      description: formData.description.trim(),
-      prompt: formData.prompt.trim(),
-      category_ids: selectedCategories.length > 0 ? selectedCategories.map(id => parseInt(id)) : [],
-      tag_ids: selectedTags.length > 0 ? selectedTags.map(id => parseInt(id)) : []
+    // 批量上传每个文件
+    for (let i = 0; i < selectedFiles.length; i++) {
+      const file = selectedFiles[i]
+
+      // 为每个文件生成唯一的标题
+      const fileTitle = totalFiles === 1
+        ? formData.title.trim()
+        : `${formData.title.trim()} ${i + 1}`
+
+      const uploadData = {
+        file: file,
+        title: fileTitle,
+        description: formData.description.trim(),
+        prompt: formData.prompt.trim(),
+        category_ids: selectedCategories.length > 0 ? selectedCategories.map(id => parseInt(id)) : [],
+        tag_ids: selectedTags.length > 0 ? selectedTags.map(id => parseInt(id)) : []
+      }
+
+      console.log(`Uploading file ${i + 1}/${totalFiles}:`, file.name)
+
+      const result = await uploadMedia(uploadData)
+
+      if (result.success) {
+        successCount++
+      } else {
+        failureCount++
+        console.error(`Failed to upload ${file.name}:`, result.message)
+      }
     }
 
-    const result = await uploadMedia(uploadData)
-
-    if (result.success) {
-      toast.success('媒体文件上传成功')
-      // 重置表单
-      setFormData({ title: '', description: '', prompt: '' })
-      setSelectedFile(null)
-      setPreviewUrl(null)
-      setSelectedCategories([])
-      setSelectedTags([])
-      if (fileInputRef.current) {
-        fileInputRef.current.value = ''
-      }
+    // 显示结果
+    if (successCount > 0 && failureCount === 0) {
+      toast.success(`成功上传 ${successCount} 个文件`)
+    } else if (successCount > 0 && failureCount > 0) {
+      toast.warning(`成功上传 ${successCount} 个文件，失败 ${failureCount} 个文件`)
     } else {
-      toast.error(result.message || '上传失败')
+      toast.error(`上传失败，请稍后重试`)
+      return
+    }
+
+    // 重置表单
+    setFormData({ title: '', description: '', prompt: '' })
+    setSelectedFiles([])
+    setPreviewUrls(new Map())
+    setSelectedCategories([])
+    setSelectedTags([])
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
     }
   }
 
@@ -226,7 +286,7 @@ export function MediaUpload() {
                 className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
                   isDragging
                     ? 'border-primary bg-primary/5'
-                    : selectedFile
+                    : selectedFiles.length > 0
                     ? 'border-green-500 bg-green-50'
                     : 'border-muted-foreground/25 hover:border-muted-foreground/50'
                 }`}
@@ -235,63 +295,90 @@ export function MediaUpload() {
                 onDrop={handleDrop}
                 onClick={() => forceFileSelect()}
               >
-                {selectedFile ? (
+                {selectedFiles.length > 0 ? (
                   <div className="space-y-4">
-                    {previewUrl ? (
-                      <div className="relative rounded-lg overflow-hidden bg-muted mx-auto w-fit">
-                        <img
-                          src={previewUrl}
-                          alt="预览"
-                          className="w-full max-w-xs h-48 object-cover"
-                        />
-                        <div className="absolute top-2 right-2">
-                          <Button
-                            type="button"
-                            variant="destructive"
-                            size="sm"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              handleRemoveFile()
-                            }}
+                    <div className="text-center">
+                      <p className="text-lg font-medium">已选择 {selectedFiles.length} 个文件</p>
+                      <p className="text-sm text-muted-foreground">总大小: {(selectedFiles.reduce((sum, f) => sum + f.size, 0) / 1024 / 1024).toFixed(2)} MB</p>
+                    </div>
+
+                    {/* 文件列表 */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-64 overflow-y-auto">
+                      {selectedFiles.map((file, index) => {
+                        const previewUrl = previewUrls.get(file.name + file.size)
+                        const fileType = guessFileTypeFromFileName(file.name)
+
+                        return (
+                          <div
+                            key={`${file.name}-${file.size}-${index}`}
+                            className="relative border rounded-lg p-3 bg-background hover:bg-muted/50 transition-colors"
                           >
-                            <X className="h-4 w-4" />
-                          </Button>
-                        </div>
-                        <div className="absolute bottom-2 left-2 bg-black/50 text-white px-2 py-1 rounded text-sm">
-                          <FileIcon mimeType={guessFileTypeFromFileName(selectedFile.name)} size="sm" className="inline mr-1" />
-                          {selectedFile.name.split('.').pop()?.toUpperCase() || 'Unknown'}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="flex flex-col items-center gap-4">
-                        <FileIcon mimeType={guessFileTypeFromFileName(selectedFile.name)} size="lg" className="text-muted-foreground" />
-                        <div className="text-center">
-                          <p className="font-medium">{selectedFile.name}</p>
-                          <p className="text-sm text-muted-foreground">
-                            {getFileInfo(guessFileTypeFromFileName(selectedFile.name)).displayName} • {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
-                          </p>
-                        </div>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            handleRemoveFile()
-                          }}
-                        >
-                          <X className="h-4 w-4 mr-2" />
-                          移除文件
-                        </Button>
-                      </div>
-                    )}
+                            {/* 文件预览/图标 */}
+                            <div className="flex items-center gap-3">
+                              {previewUrl ? (
+                                <div className="relative w-12 h-12 rounded overflow-hidden flex-shrink-0">
+                                  <img
+                                    src={previewUrl}
+                                    alt={file.name}
+                                    className="w-full h-full object-cover"
+                                  />
+                                </div>
+                              ) : (
+                                <div className="w-12 h-12 rounded bg-muted flex items-center justify-center flex-shrink-0">
+                                  <FileIcon mimeType={fileType} size="sm" className="text-muted-foreground" />
+                                </div>
+                              )}
+
+                              {/* 文件信息 */}
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium truncate" title={file.name}>
+                                  {file.name}
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                  {getFileInfo(fileType).displayName} • {(file.size / 1024 / 1024).toFixed(2)} MB
+                                </p>
+                              </div>
+
+                              {/* 移除按钮 */}
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0 flex-shrink-0"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleRemoveFile(file)
+                                }}
+                              >
+                                <X className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+
+                    {/* 添加更多文件按钮 */}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        forceFileSelect()
+                      }}
+                      disabled={isLoading}
+                    >
+                      <Plus className="h-4 w-4 mr-2" />
+                      添加更多文件
+                    </Button>
                   </div>
                 ) : (
                   <div className="flex flex-col items-center gap-4">
                     <Upload className="h-12 w-12 text-muted-foreground" />
                     <div>
                       <p className="text-lg font-medium">拖拽文件到这里</p>
-                      <p className="text-sm text-muted-foreground">或点击选择文件</p>
+                      <p className="text-sm text-muted-foreground">支持多文件选择</p>
                     </div>
                     <Button
                       type="button"
@@ -313,10 +400,11 @@ export function MediaUpload() {
                 ref={fileInputRef}
                 type="file"
                 accept=".jpg,.jpeg,.png,.gif,.bmp,.webp,.mp4,.avi,.mov,.wmv,.flv,.webm"
+                multiple={true}
                 onChange={handleFileInputChange}
                 disabled={isLoading}
                 className="hidden"
-                key={selectedFile ? 'selected' : 'empty'} // 强制重新渲染以解决状态问题
+                key={selectedFiles.length > 0 ? 'selected' : 'empty'} // 强制重新渲染以解决状态问题
               />
 
               {/* 上传进度 */}
@@ -429,10 +517,13 @@ export function MediaUpload() {
               <Button
                 type="submit"
                 className="w-full"
-                disabled={isLoading || !selectedFile}
+                disabled={isLoading || selectedFiles.length === 0}
                 size="lg"
               >
-                {isLoading ? '上传中...' : '上传媒体文件'}
+                {isLoading
+                  ? `上传中... (${selectedFiles.length} 个文件)`
+                  : `上传媒体文件${selectedFiles.length > 1 ? ` (${selectedFiles.length} 个文件)` : ''}`
+                }
               </Button>
             </form>
           </CardContent>

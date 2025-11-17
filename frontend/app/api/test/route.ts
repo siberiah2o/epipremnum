@@ -2,7 +2,10 @@ import { NextResponse } from 'next/server'
 
 export async function GET() {
   try {
-    const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://192.168.55.133:8888'
+    // 构建后端URL
+    const backendHost = process.env.NEXT_PUBLIC_BACKEND_HOST || '192.168.55.133';
+    const backendPort = process.env.NEXT_PUBLIC_BACKEND_PORT || '8888';
+    const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || `http://${backendHost}:${backendPort}`;
 
     // 测试与后端的连接
     const response = await fetch(`${API_BASE_URL}/api/`, {

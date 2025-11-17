@@ -54,7 +54,7 @@ export default function MediaUploadPage() {
         <div className="flex flex-1 flex-col gap-4 p-4">
           <div className="flex items-center justify-between">
             <p className="text-muted-foreground">
-              上传新的图片或视频文件到您的媒体库
+              上传新的图片或视频文件到您的媒体库，支持批量上传
             </p>
             <Link href="/dashboard/media">
               <Button variant="outline" className="flex items-center gap-2">
