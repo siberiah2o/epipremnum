@@ -487,11 +487,26 @@ class AIAnalysisService:
                 try:
                     data = json.loads(json_match.group(0))
                     categories = data.get('categories', [])
-                except:
+                    # 确保categories是列表
+                    if isinstance(categories, str):
+                        categories = [categories]
+                except json.JSONDecodeError:
                     # 如果JSON解析失败，尝试简单解析
                     categories = []
+                except Exception:
+                    categories = []
             else:
-                categories = []
+                # 尝试从响应中提取列表
+                list_match = re.search(r'\[(.*?)\]', response_text, re.DOTALL)
+                if list_match:
+                    try:
+                        # 简单的逗号分隔解析
+                        content = list_match.group(1)
+                        categories = [cat.strip().strip('"\'') for cat in content.split(',') if cat.strip()]
+                    except:
+                        categories = []
+                else:
+                    categories = []
 
             # 清理和验证分类
             valid_categories = []
@@ -546,11 +561,26 @@ class AIAnalysisService:
                 try:
                     data = json.loads(json_match.group(0))
                     tags = data.get('tags', [])
-                except:
+                    # 确保tags是列表
+                    if isinstance(tags, str):
+                        tags = [tags]
+                except json.JSONDecodeError:
                     # 如果JSON解析失败，尝试简单解析
                     tags = []
+                except Exception:
+                    tags = []
             else:
-                tags = []
+                # 尝试从响应中提取列表
+                list_match = re.search(r'\[(.*?)\]', response_text, re.DOTALL)
+                if list_match:
+                    try:
+                        # 简单的逗号分隔解析
+                        content = list_match.group(1)
+                        tags = [tag.strip().strip('"\'') for tag in content.split(',') if tag.strip()]
+                    except:
+                        tags = []
+                else:
+                    tags = []
 
             # 清理和验证标签
             valid_tags = []
@@ -579,7 +609,8 @@ class AIAnalysisService:
             for model_data in models_data:
                 model_name = model_data.get('name', '')
                 if ('llava' in model_name.lower() or 'vision' in model_name.lower() or
-                    'vl' in model_name.lower() or 'minicpm-v' in model_name.lower()):
+                    'vl' in model_name.lower() or 'minicpm-v' in model_name.lower() or
+                    'qwen3-vl' in model_name.lower()):
                     # 这是支持视觉的模型
                     model, created = OllamaModel.objects.get_or_create(
                         name=model_name,

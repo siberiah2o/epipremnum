@@ -1,5 +1,6 @@
 'use client'
 
+import { useRouteGuard } from "@/hooks/useRouteGuard"
 import Link from 'next/link'
 import { AppSidebar } from "@/components/app-sidebar"
 import {
@@ -21,6 +22,7 @@ import { MediaUpload } from "@/components/media"
 import { Upload, ArrowLeft } from 'lucide-react'
 
 export default function MediaUploadPage() {
+  useRouteGuard()
   return (
     <SidebarProvider>
       <AppSidebar />

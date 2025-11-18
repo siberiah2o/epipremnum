@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouteGuard } from "@/hooks/useRouteGuard"
 import { AppSidebar } from "@/components/app-sidebar"
 import {
   Breadcrumb,
@@ -24,6 +25,7 @@ import { FileImage, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 
 export default function MediaPage() {
+  useRouteGuard() // 添加路由保护
   const [editingMedia, setEditingMedia] = useState<MediaListItem | null>(null)
   const [viewingMedia, setViewingMedia] = useState<MediaListItem | null>(null)
   const [activeTab, setActiveTab] = useState('list')

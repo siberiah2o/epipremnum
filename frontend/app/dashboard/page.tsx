@@ -1,5 +1,6 @@
 'use client'
 
+import { useRouteGuard } from "@/hooks/useRouteGuard"
 import { AppSidebar } from "@/components/app-sidebar"
 import {
   Breadcrumb,
@@ -21,6 +22,7 @@ import { useAuth } from "@/contexts/auth-context"
 import { User, Mail, Phone, Calendar, Settings, LogOut } from "lucide-react"
 
 export default function DashboardPage() {
+  useRouteGuard() // 添加路由保护
   const { user, userProfile, logout } = useAuth()
 
   const handleLogout = async () => {

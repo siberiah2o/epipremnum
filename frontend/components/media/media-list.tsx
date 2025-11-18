@@ -24,7 +24,8 @@ import {
   ChevronLeft,
   ChevronRight,
   LayoutGrid,
-  List
+  List,
+  Brain
 } from 'lucide-react'
 import { MediaListItem, apiClient } from '@/lib/api'
 import { formatDistanceToNow } from 'date-fns'
@@ -187,6 +188,35 @@ export function MediaList({ onEdit, onView }: MediaListProps) {
     setMediaToDelete(null)
   }
 
+  const handleAIAnalysis = async (media: MediaListItem) => {
+    if (media.file_type !== 'image') {
+      toast.error('只有图片文件支持AI分析')
+      return
+    }
+
+    try {
+      // 使用完整分析功能
+      const response = await apiClient.generateCombined(media.id, {
+        generateTitle: true,
+        generateDescription: true,
+        generatePrompt: true,
+        generateCategories: true,
+        generateTags: true,
+        maxCategories: 5,
+        maxTags: 10
+      })
+
+      if (response.data) {
+        toast.success('图片分析完成！')
+        // 刷新媒体列表
+        refetch()
+      }
+    } catch (error: any) {
+      console.error('AI分析失败:', error)
+      toast.error(error.message || 'AI分析失败')
+    }
+  }
+
   const getFileIcon = (fileType: string) => {
     return <FileIcon mimeType={fileType} size="sm" />
   }
@@ -319,6 +349,17 @@ export function MediaList({ onEdit, onView }: MediaListProps) {
                 >
                   <Download className="h-4 w-4" />
                 </Button>
+                {media.file_type === 'image' && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => handleAIAnalysis(media)}
+                    className="h-8 w-8 p-0 bg-background/80 backdrop-blur-sm"
+                    title="AI分析"
+                  >
+                    <Brain className="h-4 w-4" />
+                  </Button>
+                )}
                 <Button
                   variant="destructive"
                   size="sm"
@@ -638,6 +679,17 @@ export function MediaList({ onEdit, onView }: MediaListProps) {
                           >
                             <Download className="h-4 w-4" />
                           </Button>
+
+                          {media.file_type === 'image' && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleAIAnalysis(media)}
+                              title="AI分析"
+                            >
+                              <Brain className="h-4 w-4" />
+                            </Button>
+                          )}
 
                           <Button
                             variant="ghost"

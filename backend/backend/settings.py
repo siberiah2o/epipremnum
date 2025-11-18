@@ -58,6 +58,7 @@ INSTALLED_APPS = [
     'corsheaders',
     'users',
     'media',
+    'ollama_ai',
 ]
 
 MIDDLEWARE = [

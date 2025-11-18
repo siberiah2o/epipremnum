@@ -1,5 +1,6 @@
 'use client'
 
+import { useRouteGuard } from "@/hooks/useRouteGuard"
 import { AppSidebar } from "@/components/app-sidebar"
 import {
   Breadcrumb,
@@ -28,6 +29,7 @@ import { User, Mail, Phone, Calendar, Camera, Save, Loader2, Eye, Edit3 } from "
 import { useState, useEffect } from "react"
 
 export default function ProfilePage() {
+  useRouteGuard()
   const { user, userProfile, updateUserProfile } = useAuth()
   const [isLoading, setIsLoading] = useState(false)
   const [formData, setFormData] = useState({

@@ -1,5 +1,5 @@
 // API 客户端配置和类型定义
-import { convertMediaUrls, convertMediaListUrls } from './media-utils';
+import { convertMediaUrls, convertMediaListUrls } from "./media-utils";
 
 export interface ApiResponse<T = any> {
   code: number;
@@ -159,6 +159,92 @@ export interface BatchDeleteData {
   ids: number[];
 }
 
+// Ollama AI 相关类型定义
+export interface OllamaModel {
+  id: number;
+  name: string;
+  display_name: string;
+  description: string;
+  is_active: boolean;
+  is_vision_capable: boolean;
+  model_size: string;
+  api_endpoint: string;
+}
+
+export interface AIAnalysisResult {
+  id: number;
+  status: string;
+  ai_title: string;
+  ai_description: string;
+  ai_prompt: string;
+  model_used: string;
+  analysis_result: any;
+  suggested_categories: SuggestedCategory[];
+  suggested_tags: SuggestedTag[];
+  error_message?: string;
+  created_at: string;
+  analyzed_at?: string;
+}
+
+export interface SuggestedCategory {
+  id: number;
+  name: string;
+  confidence: number;
+}
+
+export interface SuggestedTag {
+  id: number;
+  name: string;
+  confidence: number;
+}
+
+export interface BatchAnalysisJob {
+  job_id: string;
+  status: string;
+  total_files: number;
+  processed_files: number;
+  failed_files: number;
+  progress_percentage: number;
+  error_message?: string;
+  started_at?: string;
+  completed_at?: string;
+  created_at: string;
+}
+
+export interface CombinedAnalysisOptions {
+  generateTitle?: boolean;
+  generateDescription?: boolean;
+  generatePrompt?: boolean;
+  generateCategories?: boolean;
+  generateTags?: boolean;
+  maxCategories?: number;
+  maxTags?: number;
+  modelName?: string;
+}
+
+export interface ApplyAnalysisOptions {
+  applyTitle?: boolean;
+  applyDescription?: boolean;
+  applyPrompt?: boolean;
+  applyCategories?: boolean;
+  applyTags?: boolean;
+  categoryIds?: number[];
+  tagIds?: number[];
+}
+
+export interface OllamaEndpoint {
+  id: number;
+  name: string;
+  url: string;
+  description: string;
+  is_active: boolean;
+  is_default: boolean;
+  timeout: number;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface BatchUpdateCategoriesData {
   ids: number[];
   category_ids: number[];
@@ -177,14 +263,19 @@ export interface BatchRemoveTagsData {
 // API 基础配置
 // 在开发环境中使用相对路径，通过 Next.js 代理访问后端
 // 在生产环境中可以使用环境变量配置完整的后端URL
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL || "";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "";
 
 class ApiClient {
   private baseURL: string;
+  private onUnauthorized?: () => void;
 
   constructor(baseURL: string) {
     this.baseURL = baseURL;
+  }
+
+  // 设置全局401错误处理回调
+  setUnauthorizedHandler(handler: () => void) {
+    this.onUnauthorized = handler;
   }
 
   // 获取当前的 access token
@@ -266,6 +357,10 @@ class ApiClient {
           // 刷新失败，清除 tokens
           this.clearTokens();
           this.clearUser();
+          // 调用全局401错误处理回调
+          if (this.onUnauthorized) {
+            this.onUnauthorized();
+          }
           throw new Error("登录已过期，请重新登录");
         }
       }
@@ -594,6 +689,10 @@ class ApiClient {
           // 刷新失败，清除 tokens
           this.clearTokens();
           this.clearUser();
+          // 调用全局401错误处理回调
+          if (this.onUnauthorized) {
+            this.onUnauthorized();
+          }
           throw new Error("登录已过期，请重新登录");
         }
       }
@@ -645,7 +744,9 @@ class ApiClient {
       params.append("file_type", fileType);
     }
 
-    const response = await this.request<PaginatedMediaList>(`/api/media/?${params}`);
+    const response = await this.request<PaginatedMediaList>(
+      `/api/media/?${params}`
+    );
 
     // 转换媒体文件列表URL
     if (response.data && response.data.results) {
@@ -770,6 +871,354 @@ class ApiClient {
       method: "POST",
       body: JSON.stringify(data),
     });
+  }
+
+  // ============ Ollama AI 分析接口 ============
+
+  // 测试 Ollama 连接
+  async testOllamaConnection(): Promise<ApiResponse<any>> {
+    return this.request<any>("/api/ollama/test-connection/");
+  }
+
+  // 获取可用模型列表
+  async getAvailableModels(): Promise<ApiResponse<any>> {
+    return this.request<any>("/api/ollama/models/");
+  }
+
+  // 同步 Ollama 模型
+  async syncOllamaModels(): Promise<ApiResponse<any>> {
+    return this.request<any>("/api/ollama/models/sync/", {
+      method: "POST",
+    });
+  }
+
+  // 生成图片标题
+  async generateTitle(
+    mediaId: number,
+    modelName?: string
+  ): Promise<ApiResponse<any>> {
+    const formData = new FormData();
+    formData.append("media_id", mediaId.toString());
+    if (modelName) {
+      formData.append("model_name", modelName);
+    }
+
+    return this.requestWithFormData("/api/ollama/generate/title/", formData);
+  }
+
+  // 生成图片描述
+  async generateDescription(
+    mediaId: number,
+    modelName?: string
+  ): Promise<ApiResponse<any>> {
+    const formData = new FormData();
+    formData.append("media_id", mediaId.toString());
+    if (modelName) {
+      formData.append("model_name", modelName);
+    }
+
+    return this.requestWithFormData(
+      "/api/ollama/generate/description/",
+      formData
+    );
+  }
+
+  // 生成图片提示词
+  async generatePrompt(
+    mediaId: number,
+    modelName?: string
+  ): Promise<ApiResponse<any>> {
+    const formData = new FormData();
+    formData.append("media_id", mediaId.toString());
+    if (modelName) {
+      formData.append("model_name", modelName);
+    }
+
+    return this.requestWithFormData("/api/ollama/generate/prompt/", formData);
+  }
+
+  // 生成分类建议
+  async generateCategories(
+    mediaId: number,
+    maxCategories: number = 5,
+    modelName?: string
+  ): Promise<ApiResponse<any>> {
+    const formData = new FormData();
+    formData.append("media_id", mediaId.toString());
+    formData.append("max_categories", maxCategories.toString());
+    if (modelName) {
+      formData.append("model_name", modelName);
+    }
+
+    return this.requestWithFormData(
+      "/api/ollama/generate/categories/",
+      formData
+    );
+  }
+
+  // 生成标签建议
+  async generateTags(
+    mediaId: number,
+    maxTags: number = 10,
+    modelName?: string
+  ): Promise<ApiResponse<any>> {
+    const formData = new FormData();
+    formData.append("media_id", mediaId.toString());
+    formData.append("max_tags", maxTags.toString());
+    if (modelName) {
+      formData.append("model_name", modelName);
+    }
+
+    return this.requestWithFormData("/api/ollama/generate/tags/", formData);
+  }
+
+  // 组合分析
+  async generateCombined(
+    mediaId: number,
+    options: {
+      generateTitle?: boolean;
+      generateDescription?: boolean;
+      generatePrompt?: boolean;
+      generateCategories?: boolean;
+      generateTags?: boolean;
+      maxCategories?: number;
+      maxTags?: number;
+      modelName?: string;
+    }
+  ): Promise<ApiResponse<any>> {
+    const formData = new FormData();
+    formData.append("media_id", mediaId.toString());
+
+    if (options.generateTitle !== undefined) {
+      formData.append("generate_title", options.generateTitle.toString());
+    }
+    if (options.generateDescription !== undefined) {
+      formData.append(
+        "generate_description",
+        options.generateDescription.toString()
+      );
+    }
+    if (options.generatePrompt !== undefined) {
+      formData.append("generate_prompt", options.generatePrompt.toString());
+    }
+    if (options.generateCategories !== undefined) {
+      formData.append(
+        "generate_categories",
+        options.generateCategories.toString()
+      );
+    }
+    if (options.generateTags !== undefined) {
+      formData.append("generate_tags", options.generateTags.toString());
+    }
+    if (options.maxCategories !== undefined) {
+      formData.append("max_categories", options.maxCategories.toString());
+    }
+    if (options.maxTags !== undefined) {
+      formData.append("max_tags", options.maxTags.toString());
+    }
+    if (options.modelName) {
+      formData.append("model_name", options.modelName);
+    }
+
+    return this.requestWithFormData("/api/ollama/generate/combined/", formData);
+  }
+
+  
+  // 应用分析建议
+  async applyAnalysisSuggestions(
+    mediaId: number,
+    options: {
+      applyTitle?: boolean;
+      applyDescription?: boolean;
+      applyPrompt?: boolean;
+      applyCategories?: boolean;
+      applyTags?: boolean;
+      categoryIds?: number[];
+      tagIds?: number[];
+    }
+  ): Promise<ApiResponse<any>> {
+    return this.request<any>(`/api/ollama/analysis/${mediaId}/apply/`, {
+      method: "POST",
+      body: JSON.stringify({
+        apply_title: options.applyTitle,
+        apply_description: options.applyDescription,
+        apply_prompt: options.applyPrompt,
+        apply_categories: options.applyCategories,
+        apply_tags: options.applyTags,
+        category_ids: options.categoryIds || [],
+        tag_ids: options.tagIds || [],
+      }),
+    });
+  }
+
+  // 批量分析
+  async batchAnalyze(
+    mediaIds: number[],
+    modelName?: string
+  ): Promise<ApiResponse<any>> {
+    return this.request<any>("/api/ollama/batch-analyze/", {
+      method: "POST",
+      body: JSON.stringify({
+        media_ids: mediaIds,
+        model_name: modelName,
+      }),
+    });
+  }
+
+  // 获取批量分析状态
+  async getBatchAnalysisStatus(jobId: string): Promise<ApiResponse<any>> {
+    return this.request<any>(`/api/ollama/batch-analyze/${jobId}/status/`);
+  }
+
+  // 单张图片分析
+  async analyzeImage(
+    mediaId: number,
+    modelName?: string
+  ): Promise<ApiResponse<any>> {
+    const formData = new FormData();
+    formData.append("media_id", mediaId.toString());
+    if (modelName) {
+      formData.append("model_name", modelName);
+    }
+
+    return this.requestWithFormData("/api/ollama/analyze/", formData);
+  }
+
+  // ============ Ollama 端点管理接口 ============
+
+  // 获取所有端点
+  async getEndpoints(): Promise<ApiResponse<any>> {
+    return this.request<any>("/api/ollama/endpoints/");
+  }
+
+  // 创建新端点
+  async createEndpoint(data: {
+    name: string;
+    url: string;
+    description?: string;
+    is_default?: boolean;
+    timeout?: number;
+  }): Promise<ApiResponse<any>> {
+    return this.request<any>("/api/ollama/endpoints/", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // 获取端点详情
+  async getEndpoint(endpointId: number): Promise<ApiResponse<any>> {
+    return this.request<any>(`/api/ollama/endpoints/${endpointId}/`);
+  }
+
+  // 更新端点
+  async updateEndpoint(
+    endpointId: number,
+    data: {
+      name?: string;
+      url?: string;
+      description?: string;
+      is_active?: boolean;
+      is_default?: boolean;
+      timeout?: number;
+    }
+  ): Promise<ApiResponse<any>> {
+    return this.request<any>(`/api/ollama/endpoints/${endpointId}/`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // 删除端点
+  async deleteEndpoint(endpointId: number): Promise<ApiResponse<any>> {
+    return this.request<any>(`/api/ollama/endpoints/${endpointId}/`, {
+      method: "DELETE",
+    });
+  }
+
+  // 测试端点连接
+  async testEndpoint(endpointId?: number): Promise<ApiResponse<any>> {
+    const url = endpointId
+      ? `/api/ollama/endpoints/${endpointId}/test/`
+      : "/api/ollama/endpoints/test/";
+    return this.request<any>(url);
+  }
+
+  // 通用 FormData 请求方法
+  private async requestWithFormData<T>(
+    endpoint: string,
+    formData: FormData,
+    retryCount = 0
+  ): Promise<ApiResponse<T>> {
+    const url = `${this.baseURL}${endpoint}`;
+
+    // 获取当前的 access token
+    const token = this.getAccessToken();
+
+    const headers: Record<string, string> = {};
+
+    // 如果需要认证，添加 Authorization header
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+
+    // 添加超时控制
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000); // 60秒超时，AI分析需要更长时间
+
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        body: formData,
+        headers,
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      const data: ApiResponse<T> = await response.json();
+
+      // 处理 401 错误，尝试刷新 token
+      if (
+        response.status === 401 &&
+        this.getRefreshToken() &&
+        retryCount === 0
+      ) {
+        try {
+          await this.refreshToken();
+          // 重试原请求
+          return this.requestWithFormData<T>(
+            endpoint,
+            formData,
+            retryCount + 1
+          );
+        } catch (refreshError) {
+          // 刷新失败，清除 tokens
+          this.clearTokens();
+          this.clearUser();
+          // 调用全局401错误处理回调
+          if (this.onUnauthorized) {
+            this.onUnauthorized();
+          }
+          throw new Error("登录已过期，请重新登录");
+        }
+      }
+
+      if (!response.ok) {
+        throw new Error(data.message || `请求失败: ${response.status}`);
+      }
+
+      return data;
+    } catch (error) {
+      clearTimeout(timeoutId);
+
+      if (error instanceof Error) {
+        if (error.name === "AbortError") {
+          throw new Error("请求超时，请检查网络连接");
+        }
+        throw error;
+      }
+      throw new Error("请求发生未知错误");
+    }
   }
 }
 

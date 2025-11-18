@@ -1,5 +1,6 @@
 'use client'
 
+import { useRouteGuard } from "@/hooks/useRouteGuard"
 import Link from 'next/link'
 import { AppSidebar } from "@/components/app-sidebar"
 import {
@@ -21,6 +22,7 @@ import { CategoryManager } from "@/components/media"
 import { FolderOpen, ArrowLeft } from 'lucide-react'
 
 export default function MediaCategoriesPage() {
+  useRouteGuard()
   return (
     <SidebarProvider>
       <AppSidebar />

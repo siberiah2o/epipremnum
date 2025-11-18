@@ -11,11 +11,13 @@ import { Badge } from '@/components/ui/badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { toast } from 'sonner'
-import { Save, X } from 'lucide-react'
+import { Save, X, Brain } from 'lucide-react'
 import { MediaListItem } from '@/lib/api'
 import { FileIcon } from '@/components/ui/file-icon'
 import { getFileInfo } from '@/lib/file-utils'
+import { ImageAnalysis } from '@/components/ai/image-analysis'
 
 interface MediaEditProps {
   mediaId: number
@@ -192,164 +194,197 @@ export function MediaEdit({ mediaId, onClose, onSuccess }: MediaEditProps) {
         </div>
       </CardHeader>
       <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-6">
-          {/* 文件信息 */}
-          <div className="space-y-2">
-            <Label>文件信息</Label>
-            <div className="flex items-center gap-4 p-4 border rounded-lg">
-              {media.file_type === 'image' ? (
-                imageError ? (
-                  <div className="h-16 w-16 rounded bg-muted flex items-center justify-center">
-                    {getFileIcon(media.file_type)}
+        <Tabs defaultValue="edit" className="w-full">
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="edit" className="flex items-center gap-2">
+              <Save className="h-4 w-4" />
+              手动编辑
+            </TabsTrigger>
+            {media.file_type === 'image' && (
+              <TabsTrigger value="ai" className="flex items-center gap-2">
+                <Brain className="h-4 w-4" />
+                AI 分析
+              </TabsTrigger>
+            )}
+          </TabsList>
+
+          <TabsContent value="edit" className="space-y-6 mt-6">
+            <form onSubmit={handleSubmit} className="space-y-6">
+              {/* 文件信息 */}
+              <div className="space-y-2">
+                <Label>文件信息</Label>
+                <div className="flex items-center gap-4 p-4 border rounded-lg">
+                  {media.file_type === 'image' ? (
+                    imageError ? (
+                      <div className="h-16 w-16 rounded bg-muted flex items-center justify-center">
+                        {getFileIcon(media.file_type)}
+                      </div>
+                    ) : (
+                      <div className="h-16 w-16 rounded overflow-hidden">
+                        <img
+                          src={media.file_url}
+                          alt={media.title}
+                          className="h-16 w-16 object-cover"
+                          onError={() => setImageError(true)}
+                        />
+                      </div>
+                    )
+                  ) : media.thumbnail_url ? (
+                    <div className="h-16 w-16 rounded overflow-hidden">
+                      <img
+                        src={media.thumbnail_url}
+                        alt={media.title}
+                        className="h-16 w-16 object-cover"
+                      />
+                    </div>
+                  ) : (
+                    <div className="h-16 w-16 rounded bg-muted flex items-center justify-center">
+                      {getFileIcon(media.file_type)}
+                    </div>
+                  )}
+                  <div className="flex-1">
+                    <p className="font-medium">{media.title}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {getFileInfo(media.file_type).displayName} • {formatFileSize(media.file_size)}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      创建于 {new Date(media.created_at).toLocaleString()}
+                    </p>
                   </div>
-                ) : (
-                  <div className="h-16 w-16 rounded overflow-hidden">
-                    <img
-                      src={media.file_url}
-                      alt={media.title}
-                      className="h-16 w-16 object-cover"
-                      onError={() => setImageError(true)}
-                    />
-                  </div>
-                )
-              ) : media.thumbnail_url ? (
-                <div className="h-16 w-16 rounded overflow-hidden">
-                  <img
-                    src={media.thumbnail_url}
-                    alt={media.title}
-                    className="h-16 w-16 object-cover"
+                </div>
+              </div>
+
+              <Separator />
+
+              {/* 基本信息 */}
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="title">标题</Label>
+                  <Input
+                    id="title"
+                    value={formData.title}
+                    onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
+                    placeholder="输入媒体文件标题"
+                    disabled={isSubmitting}
+                    required
                   />
                 </div>
-              ) : (
-                <div className="h-16 w-16 rounded bg-muted flex items-center justify-center">
-                  {getFileIcon(media.file_type)}
+
+                <div className="space-y-2">
+                  <Label htmlFor="description">描述</Label>
+                  <Textarea
+                    id="description"
+                    value={formData.description}
+                    onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
+                    placeholder="输入媒体文件描述"
+                    disabled={isSubmitting}
+                    rows={3}
+                  />
                 </div>
-              )}
-              <div className="flex-1">
-                <p className="font-medium">{media.title}</p>
-                <p className="text-sm text-muted-foreground">
-                  {getFileInfo(media.file_type).displayName} • {formatFileSize(media.file_size)}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  创建于 {new Date(media.created_at).toLocaleString()}
-                </p>
+
+                <div className="space-y-2">
+                  <Label htmlFor="prompt">生成提示词</Label>
+                  <Textarea
+                    id="prompt"
+                    value={formData.prompt}
+                    onChange={(e) => setFormData(prev => ({ ...prev, prompt: e.target.value }))}
+                    placeholder="输入用于生成的提示词或关键词"
+                    disabled={isSubmitting}
+                    rows={2}
+                  />
+                </div>
               </div>
-            </div>
-          </div>
 
-          <Separator />
+              <Separator />
 
-          {/* 基本信息 */}
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="title">标题</Label>
-              <Input
-                id="title"
-                value={formData.title}
-                onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
-                placeholder="输入媒体文件标题"
-                disabled={isSubmitting}
-                required
-              />
-            </div>
+              {/* 分类选择 */}
+              <div className="space-y-2">
+                <Label>分类</Label>
+                <div className="flex flex-wrap gap-2">
+                  {categories.map(category => (
+                    <Badge
+                      key={category.id}
+                      variant={selectedCategories.includes(category.id) ? "default" : "outline"}
+                      className="cursor-pointer"
+                      onClick={() => handleCategoryToggle(category.id)}
+                    >
+                      {category.name}
+                    </Badge>
+                  ))}
+                </div>
+                {categories.length === 0 && (
+                  <p className="text-sm text-muted-foreground">暂无可用分类</p>
+                )}
+              </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="description">描述</Label>
-              <Textarea
-                id="description"
-                value={formData.description}
-                onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
-                placeholder="输入媒体文件描述"
-                disabled={isSubmitting}
-                rows={3}
-              />
-            </div>
+              {/* 标签选择 */}
+              <div className="space-y-2">
+                <Label>标签</Label>
+                <div className="flex flex-wrap gap-2">
+                  {tags.map(tag => (
+                    <Badge
+                      key={tag.id}
+                      variant={selectedTags.includes(tag.id) ? "default" : "outline"}
+                      className="cursor-pointer"
+                      onClick={() => handleTagToggle(tag.id)}
+                    >
+                      {tag.name}
+                    </Badge>
+                  ))}
+                </div>
+                {tags.length === 0 && (
+                  <p className="text-sm text-muted-foreground">暂无可用标签</p>
+                )}
+              </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="prompt">生成提示词</Label>
-              <Textarea
-                id="prompt"
-                value={formData.prompt}
-                onChange={(e) => setFormData(prev => ({ ...prev, prompt: e.target.value }))}
-                placeholder="输入用于生成的提示词或关键词"
-                disabled={isSubmitting}
-                rows={2}
-              />
-            </div>
-          </div>
-
-          <Separator />
-
-          {/* 分类选择 */}
-          <div className="space-y-2">
-            <Label>分类</Label>
-            <div className="flex flex-wrap gap-2">
-              {categories.map(category => (
-                <Badge
-                  key={category.id}
-                  variant={selectedCategories.includes(category.id) ? "default" : "outline"}
-                  className="cursor-pointer"
-                  onClick={() => handleCategoryToggle(category.id)}
+              {/* 操作按钮 */}
+              <div className="flex justify-end gap-2">
+                {onClose && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={onClose}
+                    disabled={isSubmitting}
+                  >
+                    取消
+                  </Button>
+                )}
+                <Button
+                  type="submit"
+                  disabled={isSubmitting}
                 >
-                  {category.name}
-                </Badge>
-              ))}
-            </div>
-            {categories.length === 0 && (
-              <p className="text-sm text-muted-foreground">暂无可用分类</p>
-            )}
-          </div>
+                  {isSubmitting ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
+                      保存中...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="h-4 w-4 mr-2" />
+                      保存更改
+                    </>
+                  )}
+                </Button>
+              </div>
+            </form>
+          </TabsContent>
 
-          {/* 标签选择 */}
-          <div className="space-y-2">
-            <Label>标签</Label>
-            <div className="flex flex-wrap gap-2">
-              {tags.map(tag => (
-                <Badge
-                  key={tag.id}
-                  variant={selectedTags.includes(tag.id) ? "default" : "outline"}
-                  className="cursor-pointer"
-                  onClick={() => handleTagToggle(tag.id)}
-                >
-                  {tag.name}
-                </Badge>
-              ))}
-            </div>
-            {tags.length === 0 && (
-              <p className="text-sm text-muted-foreground">暂无可用标签</p>
-            )}
-          </div>
-
-          {/* 操作按钮 */}
-          <div className="flex justify-end gap-2">
-            {onClose && (
-              <Button
-                type="button"
-                variant="outline"
-                onClick={onClose}
-                disabled={isSubmitting}
-              >
-                取消
-              </Button>
-            )}
-            <Button
-              type="submit"
-              disabled={isSubmitting}
-            >
-              {isSubmitting ? (
-                <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
-                  保存中...
-                </>
-              ) : (
-                <>
-                  <Save className="h-4 w-4 mr-2" />
-                  保存更改
-                </>
-              )}
-            </Button>
-          </div>
-        </form>
+          {media.file_type === 'image' && (
+            <TabsContent value="ai" className="mt-6">
+              <ImageAnalysis
+                mediaFile={media}
+                onAnalysisComplete={() => {
+                  // 重新加载媒体数据以获取最新的AI分析结果
+                  window.location.reload()
+                }}
+                onMediaUpdate={() => {
+                  // 重新加载媒体数据
+                  window.location.reload()
+                }}
+              />
+            </TabsContent>
+          )}
+        </Tabs>
       </CardContent>
     </Card>
   )

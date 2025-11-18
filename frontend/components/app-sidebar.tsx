@@ -53,6 +53,28 @@ const data = {
       ],
     },
     {
+      title: "AI 工具",
+      url: "#",
+      items: [
+        {
+          title: "AI 分析",
+          url: "/dashboard/ai/analysis",
+        },
+        {
+          title: "批量处理",
+          url: "/dashboard/ai/batch",
+        },
+        {
+          title: "模型管理",
+          url: "/dashboard/ai/models",
+        },
+        {
+          title: "使用统计",
+          url: "/dashboard/ai/stats",
+        },
+      ],
+    },
+    {
       title: "用户管理",
       url: "#",
       items: [

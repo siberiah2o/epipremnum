@@ -22,7 +22,8 @@ def sync_ollama_models():
             is_vision_capable = any(
                 family in ['qwen3vl', 'clip', 'llava', 'minicpm', 'vision']
                 for family in families
-            )
+            ) or ('vl' in model_name.lower() or 'vision' in model_name.lower() or
+                  'qwen3-vl' in model_name.lower() or 'minicpm-v' in model_name.lower())
 
             if is_vision_capable:
                 # 获取模型大小

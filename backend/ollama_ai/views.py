@@ -475,10 +475,12 @@ class OllamaEndpointManager(APIView):
     )
     def get(self, request):
         """获取端点列表"""
+        # 只返回用户有权限的端点：自己创建的端点 + 所有用户创建的端点（只读）
         endpoints = OllamaEndpoint.objects.all()
         endpoint_data = []
 
         for endpoint in endpoints:
+            can_delete = endpoint.created_by == request.user or request.user.is_superuser
             endpoint_data.append({
                 'id': endpoint.id,
                 'name': endpoint.name,
@@ -489,7 +491,9 @@ class OllamaEndpointManager(APIView):
                 'timeout': endpoint.timeout,
                 'created_by': endpoint.created_by.username,
                 'created_at': endpoint.created_at,
-                'updated_at': endpoint.updated_at
+                'updated_at': endpoint.updated_at,
+                'can_delete': can_delete,  # 添加权限标识
+                'is_owner': endpoint.created_by == request.user
             })
 
         return Response({
@@ -808,7 +812,8 @@ class SyncOllamaModels(APIView):
                 is_vision_capable = any(
                     family in ['qwen3vl', 'clip', 'llava', 'minicpm', 'vision']
                     for family in families
-                )
+                ) or ('vl' in model_name.lower() or 'vision' in model_name.lower() or
+                      'qwen3-vl' in model_name.lower() or 'minicpm-v' in model_name.lower())
 
                 if is_vision_capable:
                     # 获取模型大小

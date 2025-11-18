@@ -1,6 +1,7 @@
 'use client'
 
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react'
+import { useRouter } from 'next/navigation'
 import { apiClient, User, UserProfile, LoginData, RegisterData } from '@/lib/api'
 
 interface AuthContextType {
@@ -21,8 +22,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const router = useRouter()
 
   const isAuthenticated = !!user
+
+  // 设置全局401错误处理
+  useEffect(() => {
+    // 设置全局401错误处理回调
+    apiClient.setUnauthorizedHandler(() => {
+      // 清除本地状态
+      setUser(null);
+      setUserProfile(null);
+      apiClient.clearTokens();
+      apiClient.clearUser();
+      // 重定向到登录页面
+      router.push('/login');
+    });
+  }, [router]);
 
   // 初始化认证状态
   useEffect(() => {
