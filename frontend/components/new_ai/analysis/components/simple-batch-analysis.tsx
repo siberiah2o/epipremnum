@@ -130,6 +130,11 @@ export function SimpleBatchAnalysis({
       1, // concurrencyLimit - 串行处理，避免数据库锁和资源竞争
       (successCount: number, failedCount: number) => {
         // 任务完成后的处理
+        console.log(`🔍 [BATCH] 批量分析完成：成功 ${successCount}，失败 ${failedCount}`);
+
+        // 重置分析状态
+        resetAnalysis();
+
         if (onJobComplete) {
           onJobComplete(successCount, failedCount);
         }
