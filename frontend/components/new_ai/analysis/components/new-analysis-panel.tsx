@@ -185,11 +185,19 @@ const ImageInfoPanel = ({ selectedFile }: { selectedFile: MediaFile }) => {
                 // 使用与分析状态面板相同的判断逻辑
                 const hasDescription = !!selectedFile.ai_description;
                 const hasPrompt = !!selectedFile.ai_prompt;
-                const hasCategories = selectedFile.ai_categories && selectedFile.ai_categories.length > 0;
-                const hasTags = selectedFile.ai_tags && selectedFile.ai_tags.length > 0;
+                const hasCategories =
+                  selectedFile.ai_categories &&
+                  selectedFile.ai_categories.length > 0;
+                const hasTags =
+                  selectedFile.ai_tags && selectedFile.ai_tags.length > 0;
                 const hasAnalyzedAt = !!selectedFile.ai_analyzed_at;
 
-                const hasAIResults = hasDescription || hasPrompt || hasCategories || hasTags || hasAnalyzedAt;
+                const hasAIResults =
+                  hasDescription ||
+                  hasPrompt ||
+                  hasCategories ||
+                  hasTags ||
+                  hasAnalyzedAt;
 
                 return hasAIResults ? (
                   <Badge variant="secondary" className="text-xs">
@@ -325,9 +333,9 @@ export function NewAnalysisPanel({
   // 调试信息 - 使用延迟输出避免被其他日志覆盖
   if (process.env.NODE_ENV === "development") {
     setTimeout(() => {
-      console.group('🔍 [DEBUG] 模型状态（默认端点）');
-      console.log('总模型数量:', models.length);
-      console.log('视觉模型数量:', visionModels.length);
+      console.group("🔍 [DEBUG] 模型状态（默认端点）");
+      console.log("总模型数量:", models.length);
+      console.log("视觉模型数量:", visionModels.length);
       console.table(models);
       console.groupEnd();
     }, 100);
@@ -436,7 +444,7 @@ export function NewAnalysisPanel({
       {/* 图片信息面板 */}
       <ImageInfoPanel selectedFile={selectedFile} />
 
-    {/* AI 分析控制面板 */}
+      {/* AI 分析控制面板 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* 左列：AI 分析控制 */}
         <Card>
@@ -475,15 +483,12 @@ export function NewAnalysisPanel({
                   <option value="" disabled>
                     {models.length === 0
                       ? "没有获取到模型数据，请检查API连接"
-                      : "默认端点没有可用的活跃视觉模型，请在AI管理中检查"
-                    }
+                      : "默认端点没有可用的活跃视觉模型，请在AI管理中检查"}
                   </option>
                 ) : null}
               </select>
             </div>
 
-  
-  
             {/* 操作按钮 */}
             <div className="flex gap-2 flex-wrap">
               <Button
@@ -528,8 +533,7 @@ export function NewAnalysisPanel({
                   刷新模型
                 </Button>
               )}
-
-              </div>
+            </div>
 
             {analysisError && (
               <Alert variant="destructive" className="mt-4">
@@ -557,27 +561,39 @@ export function NewAnalysisPanel({
                     // 检查是否有AI分析结果 - 只要有任何一个AI字段有值就认为是已分析
                     const hasDescription = !!selectedFile.ai_description;
                     const hasPrompt = !!selectedFile.ai_prompt;
-                    const hasCategories = selectedFile.ai_categories && selectedFile.ai_categories.length > 0;
-                    const hasTags = selectedFile.ai_tags && selectedFile.ai_tags.length > 0;
+                    const hasCategories =
+                      selectedFile.ai_categories &&
+                      selectedFile.ai_categories.length > 0;
+                    const hasTags =
+                      selectedFile.ai_tags && selectedFile.ai_tags.length > 0;
                     const hasAnalyzedAt = !!selectedFile.ai_analyzed_at;
 
-                    const hasAIResults = hasDescription || hasPrompt || hasCategories || hasTags || hasAnalyzedAt;
+                    const hasAIResults =
+                      hasDescription ||
+                      hasPrompt ||
+                      hasCategories ||
+                      hasTags ||
+                      hasAnalyzedAt;
 
                     // 开发环境调试信息
                     if (process.env.NODE_ENV === "development") {
-                      console.log(`🔍 [DEBUG] 文件 ${selectedFile.id} 分析状态:`, {
-                        hasAIResults,
-                        hasAnalyzedAt,
-                        hasDescription,
-                        hasPrompt,
-                        hasCategories,
-                        hasTags,
-                        ai_analyzed_at: selectedFile.ai_analyzed_at,
-                        description_length: selectedFile.ai_description?.length,
-                        prompt_length: selectedFile.ai_prompt?.length,
-                        categories_count: selectedFile.ai_categories?.length,
-                        tags_count: selectedFile.ai_tags?.length
-                      });
+                      console.log(
+                        `🔍 [DEBUG] 文件 ${selectedFile.id} 分析状态:`,
+                        {
+                          hasAIResults,
+                          hasAnalyzedAt,
+                          hasDescription,
+                          hasPrompt,
+                          hasCategories,
+                          hasTags,
+                          ai_analyzed_at: selectedFile.ai_analyzed_at,
+                          description_length:
+                            selectedFile.ai_description?.length,
+                          prompt_length: selectedFile.ai_prompt?.length,
+                          categories_count: selectedFile.ai_categories?.length,
+                          tags_count: selectedFile.ai_tags?.length,
+                        }
+                      );
                     }
 
                     return hasAIResults ? "已分析" : "未分析";

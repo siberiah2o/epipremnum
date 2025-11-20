@@ -17,7 +17,7 @@ import { Save, X, Brain } from 'lucide-react'
 import { MediaListItem } from '@/lib/api'
 import { FileIcon } from '@/components/ui/file-icon'
 import { getFileInfo } from '@/lib/file-utils'
-import { ImageAnalysis } from '@/components/ai/image-analysis'
+import { NewAnalysisPanel } from '@/components/new_ai/analysis/components/new-analysis-panel'
 
 interface MediaEditProps {
   mediaId: number
@@ -371,14 +371,10 @@ export function MediaEdit({ mediaId, onClose, onSuccess }: MediaEditProps) {
 
           {media.file_type === 'image' && (
             <TabsContent value="ai" className="mt-6">
-              <ImageAnalysis
-                mediaFile={media}
-                onAnalysisComplete={() => {
-                  // 重新加载媒体数据以获取最新的AI分析结果
-                  window.location.reload()
-                }}
+              <NewAnalysisPanel
+                selectedFile={media}
                 onMediaUpdate={() => {
-                  // 重新加载媒体数据
+                  // 重新加载媒体数据以获取最新的AI分析结果
                   window.location.reload()
                 }}
               />
