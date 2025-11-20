@@ -12,16 +12,13 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 import { Separator } from "@/components/ui/separator";
-import { Button } from "@/components/ui/button";
 import {
   SidebarInset,
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
-import { Badge } from "@/components/ui/badge";
 import { SimpleBatchAnalysis } from "@/components/new_ai/analysis/components/simple-batch-analysis";
 import { apiClient, type MediaListItem } from "@/lib/api";
-import { Download, RefreshCw } from "lucide-react";
 
 export default function NewBatchAnalysisPage() {
   useRouteGuard(); // 添加路由保护
@@ -169,23 +166,11 @@ export default function NewBatchAnalysisPage() {
             totalFiles={totalFiles}
             loading={loading}
             onRefresh={refreshFiles}
+            onLoadMore={
+              mediaFiles.length < totalFiles ? loadMoreFiles : undefined
+            }
             onMediaUpdate={handleMediaUpdate}
           />
-
-          {/* 加载更多按钮 */}
-          {mediaFiles.length < totalFiles && (
-            <div className="flex justify-center">
-              <Button
-                variant="outline"
-                onClick={loadMoreFiles}
-                disabled={loading}
-                className="min-w-32"
-              >
-                <Download className="h-4 w-4 mr-2" />
-                加载更多文件
-              </Button>
-            </div>
-          )}
         </div>
       </SidebarInset>
     </SidebarProvider>
