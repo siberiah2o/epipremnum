@@ -37,13 +37,20 @@ class MediaSerializer(serializers.ModelSerializer):
         required=False,
         help_text="标签ID列表"
     )
+    # AI相关字段
+    ai_description = serializers.SerializerMethodField()
+    ai_prompt = serializers.SerializerMethodField()
+    ai_categories = serializers.SerializerMethodField()
+    ai_tags = serializers.SerializerMethodField()
+    ai_analyzed_at = serializers.SerializerMethodField()
 
     class Meta:
         model = Media
         fields = (
             'id', 'title', 'description', 'prompt', 'file', 'file_type', 'file_size',
             'thumbnail', 'file_url', 'thumbnail_url', 'user', 'categories', 'tags',
-            'category_ids', 'tag_ids', 'created_at', 'updated_at'
+            'category_ids', 'tag_ids', 'created_at', 'updated_at',
+            'ai_description', 'ai_prompt', 'ai_categories', 'ai_tags', 'ai_analyzed_at'
         )
         read_only_fields = ('id', 'file_type', 'file_size', 'user', 'created_at', 'updated_at')
 
@@ -64,6 +71,65 @@ class MediaSerializer(serializers.ModelSerializer):
                 return request.build_absolute_uri(obj.thumbnail.url)
             return obj.thumbnail.url
         return None
+
+    def get_ai_description(self, obj):
+        """获取AI生成的描述"""
+        try:
+            from llms.models import AIAnalysis
+            ai_analysis = AIAnalysis.objects.filter(media=obj).first()
+            # 直接从description字段获取描述
+            if ai_analysis and ai_analysis.description:
+                return ai_analysis.description
+            return None
+        except:
+            return None
+
+    def get_ai_prompt(self, obj):
+        """获取AI生成的提示词"""
+        try:
+            from llms.models import AIAnalysis
+            ai_analysis = AIAnalysis.objects.filter(media=obj).first()
+            # 直接从prompt字段获取提示词
+            if ai_analysis and ai_analysis.prompt:
+                return ai_analysis.prompt
+            return None
+        except:
+            return None
+
+    def get_ai_categories(self, obj):
+        """获取AI建议的分类"""
+        try:
+            from llms.models import AIAnalysis
+            ai_analysis = AIAnalysis.objects.filter(media=obj).first()
+            if ai_analysis:
+                categories = ai_analysis.suggested_categories.all()
+                return [{'id': cat.id, 'name': cat.name} for cat in categories]
+            return []
+        except:
+            return []
+
+    def get_ai_tags(self, obj):
+        """获取AI建议的标签"""
+        try:
+            from llms.models import AIAnalysis
+            ai_analysis = AIAnalysis.objects.filter(media=obj).first()
+            if ai_analysis:
+                tags = ai_analysis.suggested_tags.all()
+                return [{'id': tag.id, 'name': tag.name} for tag in tags]
+            return []
+        except:
+            return []
+
+    def get_ai_analyzed_at(self, obj):
+        """获取AI分析时间"""
+        try:
+            from llms.models import AIAnalysis
+            ai_analysis = AIAnalysis.objects.filter(media=obj).first()
+            if ai_analysis and ai_analysis.analyzed_at:
+                return ai_analysis.analyzed_at.isoformat()
+            return None
+        except:
+            return None
 
     def create(self, validated_data):
         """创建媒体文件"""
@@ -120,12 +186,17 @@ class MediaListSerializer(serializers.ModelSerializer):
     """媒体文件列表序列化器（简化版）"""
     file_url = serializers.SerializerMethodField()
     thumbnail_url = serializers.SerializerMethodField()
+    ai_description = serializers.SerializerMethodField()
+    ai_prompt = serializers.SerializerMethodField()
+    ai_categories = serializers.SerializerMethodField()
+    ai_tags = serializers.SerializerMethodField()
+    ai_analyzed_at = serializers.SerializerMethodField()
 
     class Meta:
         model = Media
         fields = (
-            'id', 'title', 'file_type', 'file_size', 'file_url', 'thumbnail_url',
-            'created_at'
+            'id', 'title', 'description', 'file_type', 'file_size', 'file_url', 'thumbnail_url',
+            'created_at', 'ai_description', 'ai_prompt', 'ai_categories', 'ai_tags', 'ai_analyzed_at'
         )
 
     def get_file_url(self, obj):
@@ -145,6 +216,65 @@ class MediaListSerializer(serializers.ModelSerializer):
                 return request.build_absolute_uri(obj.thumbnail.url)
             return obj.thumbnail.url
         return None
+
+    def get_ai_description(self, obj):
+        """获取AI生成的描述"""
+        try:
+            from llms.models import AIAnalysis
+            ai_analysis = AIAnalysis.objects.filter(media=obj).first()
+            # 直接从description字段获取描述
+            if ai_analysis and ai_analysis.description:
+                return ai_analysis.description
+            return None
+        except:
+            return None
+
+    def get_ai_prompt(self, obj):
+        """获取AI生成的提示词"""
+        try:
+            from llms.models import AIAnalysis
+            ai_analysis = AIAnalysis.objects.filter(media=obj).first()
+            # 直接从prompt字段获取提示词
+            if ai_analysis and ai_analysis.prompt:
+                return ai_analysis.prompt
+            return None
+        except:
+            return None
+
+    def get_ai_categories(self, obj):
+        """获取AI建议的分类"""
+        try:
+            from llms.models import AIAnalysis
+            ai_analysis = AIAnalysis.objects.filter(media=obj).first()
+            if ai_analysis:
+                categories = ai_analysis.suggested_categories.all()
+                return [{'id': cat.id, 'name': cat.name} for cat in categories]
+            return []
+        except:
+            return []
+
+    def get_ai_tags(self, obj):
+        """获取AI建议的标签"""
+        try:
+            from llms.models import AIAnalysis
+            ai_analysis = AIAnalysis.objects.filter(media=obj).first()
+            if ai_analysis:
+                tags = ai_analysis.suggested_tags.all()
+                return [{'id': tag.id, 'name': tag.name} for tag in tags]
+            return []
+        except:
+            return []
+
+    def get_ai_analyzed_at(self, obj):
+        """获取AI分析时间"""
+        try:
+            from llms.models import AIAnalysis
+            ai_analysis = AIAnalysis.objects.filter(media=obj).first()
+            if ai_analysis and ai_analysis.analyzed_at:
+                return ai_analysis.analyzed_at.isoformat()
+            return None
+        except:
+            return None
 
 
 class MediaUploadSerializer(serializers.ModelSerializer):

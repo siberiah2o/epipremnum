@@ -88,11 +88,23 @@ export interface MediaFile {
 export interface MediaListItem {
   id: number;
   title: string;
+  description: string | null;
   file_type: string;
   file_size: number;
   file_url: string;
   thumbnail_url: string | null;
   created_at: string;
+  ai_description: string | null;
+  ai_tags?: Array<{
+    id: number;
+    name: string;
+  }> | null;
+  ai_categories?: Array<{
+    id: number;
+    name: string;
+  }> | null;
+  ai_prompt?: string | null;
+  ai_analyzed_at?: string | null;
 }
 
 export interface PaginatedMediaList {
@@ -168,47 +180,45 @@ export interface OllamaModel {
   is_active: boolean;
   is_vision_capable: boolean;
   model_size: string;
-  api_endpoint: string;
+  api_endpoint?: string;
 }
 
 export interface AIAnalysisResult {
   id: number;
+  media: {
+    id: number;
+    title: string;
+    file_type: string;
+    file_url?: string;
+  };
   status: string;
-  ai_title: string;
-  ai_description: string;
-  ai_prompt: string;
   model_used: string;
+  suggestions: {
+    title?: string;
+    description?: string;
+    prompt?: string;
+    categories?: SuggestedCategory[];
+    tags?: SuggestedTag[];
+  };
   analysis_result: any;
   suggested_categories: SuggestedCategory[];
   suggested_tags: SuggestedTag[];
   error_message?: string;
   created_at: string;
+  updated_at: string;
   analyzed_at?: string;
 }
 
 export interface SuggestedCategory {
-  id: number;
+  id?: number;
   name: string;
   confidence: number;
 }
 
 export interface SuggestedTag {
-  id: number;
+  id?: number;
   name: string;
   confidence: number;
-}
-
-export interface BatchAnalysisJob {
-  job_id: string;
-  status: string;
-  total_files: number;
-  processed_files: number;
-  failed_files: number;
-  progress_percentage: number;
-  error_message?: string;
-  started_at?: string;
-  completed_at?: string;
-  created_at: string;
 }
 
 export interface CombinedAnalysisOptions {
@@ -236,13 +246,16 @@ export interface OllamaEndpoint {
   id: number;
   name: string;
   url: string;
-  description: string;
-  is_active: boolean;
-  is_default: boolean;
-  timeout: number;
-  created_by: string;
-  created_at: string;
-  updated_at: string;
+  description?: string;
+  is_active?: boolean;
+  is_default?: boolean;
+  timeout?: number;
+  created_by?: string;
+  created_by_username?: string;
+  created_at?: string;
+  updated_at?: string;
+  can_delete?: boolean;
+  is_owner?: boolean;
 }
 
 export interface BatchUpdateCategoriesData {
@@ -316,6 +329,16 @@ class ApiClient {
     options: RequestInit = {},
     retryCount = 0
   ): Promise<ApiResponse<T>> {
+    return this.requestWithTimeout<T>(endpoint, options, 10000, retryCount); // 默认10秒超时
+  }
+
+  // 带自定义超时的请求方法
+  private async requestWithTimeout<T>(
+    endpoint: string,
+    options: RequestInit = {},
+    timeoutMs = 10000,
+    retryCount = 0
+  ): Promise<ApiResponse<T>> {
     const url = `${this.baseURL}${endpoint}`;
 
     const headers: Record<string, string> = {
@@ -330,7 +353,7 @@ class ApiClient {
 
     // 添加超时控制
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10秒超时
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
       const response = await fetch(url, {
@@ -352,7 +375,12 @@ class ApiClient {
         try {
           await this.refreshToken();
           // 重试原请求
-          return this.request<T>(endpoint, options, retryCount + 1);
+          return this.requestWithTimeout<T>(
+            endpoint,
+            options,
+            timeoutMs,
+            retryCount + 1
+          );
         } catch (refreshError) {
           // 刷新失败，清除 tokens
           this.clearTokens();
@@ -375,7 +403,7 @@ class ApiClient {
 
       if (error instanceof Error) {
         if (error.name === "AbortError") {
-          throw new Error("请求超时，请检查网络连接");
+          throw new Error(`请求超时，请检查网络连接 (${timeoutMs / 1000}秒)`);
         }
         throw error;
       }
@@ -875,9 +903,28 @@ class ApiClient {
 
   // ============ Ollama AI 分析接口 ============
 
-  // 测试 Ollama 连接
-  async testOllamaConnection(): Promise<ApiResponse<any>> {
-    return this.request<any>("/api/ollama/test-connection/");
+  // 生成综合AI分析
+  async generateCombined(
+    mediaId: number,
+    options: CombinedAnalysisOptions
+  ): Promise<ApiResponse<any>> {
+    return this.request<any>("/api/ollama/analyze/single/", {
+      method: "POST",
+      body: JSON.stringify({
+        media_id: mediaId,
+        model_name: options.modelName,
+        force_reanalyze: true, // 强制重新分析以获取最新结果
+        options: {
+          generate_title: options.generateTitle ?? true,
+          generate_description: options.generateDescription ?? true,
+          generate_prompt: options.generatePrompt ?? true,
+          generate_categories: options.generateCategories ?? true,
+          generate_tags: options.generateTags ?? true,
+          max_categories: options.maxCategories ?? 5,
+          max_tags: options.maxTags ?? 10,
+        },
+      }),
+    });
   }
 
   // 获取可用模型列表
@@ -885,210 +932,137 @@ class ApiClient {
     return this.request<any>("/api/ollama/models/");
   }
 
-  // 同步 Ollama 模型
-  async syncOllamaModels(): Promise<ApiResponse<any>> {
-    return this.request<any>("/api/ollama/models/sync/", {
+  // 刷新 Ollama 模型
+  async refreshOllamaModels(endpointId?: number): Promise<ApiResponse<any>> {
+    const url = endpointId
+      ? `/api/ollama/models/refresh/?endpoint_id=${endpointId}`
+      : "/api/ollama/models/refresh/";
+    return this.request<any>(url, {
       method: "POST",
     });
   }
 
-  // 生成图片标题
-  async generateTitle(
-    mediaId: number,
-    modelName?: string
-  ): Promise<ApiResponse<any>> {
-    const formData = new FormData();
-    formData.append("media_id", mediaId.toString());
-    if (modelName) {
-      formData.append("model_name", modelName);
-    }
-
-    return this.requestWithFormData("/api/ollama/generate/title/", formData);
+  // 获取模型详情
+  async getModelDetails(modelId: number): Promise<ApiResponse<any>> {
+    return this.request<any>(`/api/ollama/models/${modelId}/`);
   }
 
-  // 生成图片描述
-  async generateDescription(
-    mediaId: number,
-    modelName?: string
-  ): Promise<ApiResponse<any>> {
-    const formData = new FormData();
-    formData.append("media_id", mediaId.toString());
-    if (modelName) {
-      formData.append("model_name", modelName);
-    }
-
-    return this.requestWithFormData(
-      "/api/ollama/generate/description/",
-      formData
-    );
+  // 测试模型连接
+  async testModel(modelId: number): Promise<ApiResponse<any>> {
+    return this.request<any>(`/api/ollama/models/${modelId}/test/`);
   }
 
-  // 生成图片提示词
-  async generatePrompt(
-    mediaId: number,
-    modelName?: string
-  ): Promise<ApiResponse<any>> {
-    const formData = new FormData();
-    formData.append("media_id", mediaId.toString());
-    if (modelName) {
-      formData.append("model_name", modelName);
-    }
-
-    return this.requestWithFormData("/api/ollama/generate/prompt/", formData);
-  }
-
-  // 生成分类建议
-  async generateCategories(
-    mediaId: number,
-    maxCategories: number = 5,
-    modelName?: string
-  ): Promise<ApiResponse<any>> {
-    const formData = new FormData();
-    formData.append("media_id", mediaId.toString());
-    formData.append("max_categories", maxCategories.toString());
-    if (modelName) {
-      formData.append("model_name", modelName);
-    }
-
-    return this.requestWithFormData(
-      "/api/ollama/generate/categories/",
-      formData
-    );
-  }
-
-  // 生成标签建议
-  async generateTags(
-    mediaId: number,
-    maxTags: number = 10,
-    modelName?: string
-  ): Promise<ApiResponse<any>> {
-    const formData = new FormData();
-    formData.append("media_id", mediaId.toString());
-    formData.append("max_tags", maxTags.toString());
-    if (modelName) {
-      formData.append("model_name", modelName);
-    }
-
-    return this.requestWithFormData("/api/ollama/generate/tags/", formData);
-  }
-
-  // 组合分析
-  async generateCombined(
-    mediaId: number,
-    options: {
-      generateTitle?: boolean;
-      generateDescription?: boolean;
-      generatePrompt?: boolean;
-      generateCategories?: boolean;
-      generateTags?: boolean;
-      maxCategories?: number;
-      maxTags?: number;
-      modelName?: string;
-    }
-  ): Promise<ApiResponse<any>> {
-    const formData = new FormData();
-    formData.append("media_id", mediaId.toString());
-
-    if (options.generateTitle !== undefined) {
-      formData.append("generate_title", options.generateTitle.toString());
-    }
-    if (options.generateDescription !== undefined) {
-      formData.append(
-        "generate_description",
-        options.generateDescription.toString()
-      );
-    }
-    if (options.generatePrompt !== undefined) {
-      formData.append("generate_prompt", options.generatePrompt.toString());
-    }
-    if (options.generateCategories !== undefined) {
-      formData.append(
-        "generate_categories",
-        options.generateCategories.toString()
-      );
-    }
-    if (options.generateTags !== undefined) {
-      formData.append("generate_tags", options.generateTags.toString());
-    }
-    if (options.maxCategories !== undefined) {
-      formData.append("max_categories", options.maxCategories.toString());
-    }
-    if (options.maxTags !== undefined) {
-      formData.append("max_tags", options.maxTags.toString());
-    }
-    if (options.modelName) {
-      formData.append("model_name", options.modelName);
-    }
-
-    return this.requestWithFormData("/api/ollama/generate/combined/", formData);
-  }
-
-  
-  // 应用分析建议
-  async applyAnalysisSuggestions(
-    mediaId: number,
-    options: {
-      applyTitle?: boolean;
-      applyDescription?: boolean;
-      applyPrompt?: boolean;
-      applyCategories?: boolean;
-      applyTags?: boolean;
-      categoryIds?: number[];
-      tagIds?: number[];
-    }
-  ): Promise<ApiResponse<any>> {
-    return this.request<any>(`/api/ollama/analysis/${mediaId}/apply/`, {
+  // 设置默认模型（通过ID）
+  async setDefaultModelById(modelId: number): Promise<ApiResponse<any>> {
+    return this.request<any>(`/api/ollama/models/${modelId}/default/`, {
       method: "POST",
-      body: JSON.stringify({
-        apply_title: options.applyTitle,
-        apply_description: options.applyDescription,
-        apply_prompt: options.applyPrompt,
-        apply_categories: options.applyCategories,
-        apply_tags: options.applyTags,
-        category_ids: options.categoryIds || [],
-        tag_ids: options.tagIds || [],
-      }),
     });
   }
 
-  // 批量分析
-  async batchAnalyze(
-    mediaIds: number[],
-    modelName?: string
+  // 设置默认模型（通过名称和端点）
+  async setDefaultModelByName(
+    modelName: string,
+    endpointId: number
   ): Promise<ApiResponse<any>> {
-    return this.request<any>("/api/ollama/batch-analyze/", {
+    return this.request<any>("/api/ollama/models/set-default/", {
       method: "POST",
       body: JSON.stringify({
-        media_ids: mediaIds,
         model_name: modelName,
+        endpoint_id: endpointId,
       }),
     });
   }
 
-  // 获取批量分析状态
-  async getBatchAnalysisStatus(jobId: string): Promise<ApiResponse<any>> {
-    return this.request<any>(`/api/ollama/batch-analyze/${jobId}/status/`);
+  // 图片分析接口 - 根据新API文档更新（异步分析）
+  async analyzeSingle(
+    mediaId: number,
+    modelName?: string,
+    options?: {
+      generate_title?: boolean;
+      generate_description?: boolean;
+      generate_prompt?: boolean;
+      generate_categories?: boolean;
+      generate_tags?: boolean;
+      max_categories?: number;
+      max_tags?: number;
+    }
+  ): Promise<ApiResponse<any>> {
+    // AI分析使用较短的30秒超时，因为这是创建任务请求
+    return this.requestWithTimeout<any>(
+      "/api/ollama/analyze/single/",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          media_id: mediaId,
+          model_name: modelName,
+          options: {
+            generate_title: options?.generate_title ?? true,
+            generate_description: options?.generate_description ?? true,
+            generate_prompt: options?.generate_prompt ?? false, // 默认不生成prompt以提高速度
+            generate_categories: options?.generate_categories ?? true,
+            generate_tags: options?.generate_tags ?? true,
+            max_categories: options?.max_categories ?? 5,
+            max_tags: options?.max_tags ?? 10,
+          },
+        }),
+      },
+      30000 // 30秒超时，只是创建任务
+    );
   }
 
-  // 单张图片分析
-  async analyzeImage(
-    mediaId: number,
-    modelName?: string
-  ): Promise<ApiResponse<any>> {
-    const formData = new FormData();
-    formData.append("media_id", mediaId.toString());
-    if (modelName) {
-      formData.append("model_name", modelName);
-    }
+  // 获取AI分析状态
+  async getAIAnalysisStatus(analysisId: number): Promise<ApiResponse<any>> {
+    console.log(`🚀 [API] 获取分析状态: analysisId=${analysisId}`);
 
-    return this.requestWithFormData("/api/ollama/analyze/", formData);
+    const requestData = {
+      analysis_id: analysisId,
+    };
+
+    console.log(`🚀 [API] 请求参数:`, requestData);
+
+    try {
+      const response = await this.request<any>("/api/ollama/analyze/detail/", {
+        method: "POST",
+        body: JSON.stringify(requestData),
+      });
+
+      console.log(`🚀 [API] 分析状态响应:`, response);
+      return response;
+    } catch (error) {
+      console.error(`🚀 [API] 获取分析状态失败:`, error);
+      throw error;
+    }
+  }
+
+  // 获取AI分析列表
+  async getAnalysisList(
+    page: number = 1,
+    pageSize: number = 20
+  ): Promise<ApiResponse<any>> {
+    return this.request<any>("/api/ollama/analyze/list/", {
+      method: "POST",
+      body: JSON.stringify({
+        page: page,
+        page_size: pageSize,
+      }),
+    });
+  }
+
+  // 获取分析结果详情
+  async getAnalysisDetails(analysisId: number): Promise<ApiResponse<any>> {
+    return this.request<any>("/api/ollama/analyze/detail/", {
+      method: "POST",
+      body: JSON.stringify({
+        analysis_id: analysisId,
+      }),
+    });
   }
 
   // ============ Ollama 端点管理接口 ============
 
   // 获取所有端点
   async getEndpoints(): Promise<ApiResponse<any>> {
-    return this.request<any>("/api/ollama/endpoints/");
+    return this.request<any>("/api/ollama/endpoint/");
   }
 
   // 创建新端点
@@ -1099,7 +1073,7 @@ class ApiClient {
     is_default?: boolean;
     timeout?: number;
   }): Promise<ApiResponse<any>> {
-    return this.request<any>("/api/ollama/endpoints/", {
+    return this.request<any>("/api/ollama/endpoint/", {
       method: "POST",
       body: JSON.stringify(data),
     });
@@ -1107,7 +1081,7 @@ class ApiClient {
 
   // 获取端点详情
   async getEndpoint(endpointId: number): Promise<ApiResponse<any>> {
-    return this.request<any>(`/api/ollama/endpoints/${endpointId}/`);
+    return this.request<any>(`/api/ollama/endpoint/${endpointId}/`);
   }
 
   // 更新端点
@@ -1122,103 +1096,25 @@ class ApiClient {
       timeout?: number;
     }
   ): Promise<ApiResponse<any>> {
-    return this.request<any>(`/api/ollama/endpoints/${endpointId}/`, {
-      method: "PUT",
+    return this.request<any>(`/api/ollama/endpoint/${endpointId}/`, {
+      method: "POST",
       body: JSON.stringify(data),
     });
   }
 
   // 删除端点
   async deleteEndpoint(endpointId: number): Promise<ApiResponse<any>> {
-    return this.request<any>(`/api/ollama/endpoints/${endpointId}/`, {
-      method: "DELETE",
+    return this.request<any>(`/api/ollama/endpoint/${endpointId}/delete/`, {
+      method: "POST",
     });
   }
 
   // 测试端点连接
   async testEndpoint(endpointId?: number): Promise<ApiResponse<any>> {
     const url = endpointId
-      ? `/api/ollama/endpoints/${endpointId}/test/`
-      : "/api/ollama/endpoints/test/";
+      ? `/api/ollama/endpoint/${endpointId}/test/`
+      : "/api/ollama/endpoint/test/";
     return this.request<any>(url);
-  }
-
-  // 通用 FormData 请求方法
-  private async requestWithFormData<T>(
-    endpoint: string,
-    formData: FormData,
-    retryCount = 0
-  ): Promise<ApiResponse<T>> {
-    const url = `${this.baseURL}${endpoint}`;
-
-    // 获取当前的 access token
-    const token = this.getAccessToken();
-
-    const headers: Record<string, string> = {};
-
-    // 如果需要认证，添加 Authorization header
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
-    }
-
-    // 添加超时控制
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000); // 60秒超时，AI分析需要更长时间
-
-    try {
-      const response = await fetch(url, {
-        method: "POST",
-        body: formData,
-        headers,
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutId);
-
-      const data: ApiResponse<T> = await response.json();
-
-      // 处理 401 错误，尝试刷新 token
-      if (
-        response.status === 401 &&
-        this.getRefreshToken() &&
-        retryCount === 0
-      ) {
-        try {
-          await this.refreshToken();
-          // 重试原请求
-          return this.requestWithFormData<T>(
-            endpoint,
-            formData,
-            retryCount + 1
-          );
-        } catch (refreshError) {
-          // 刷新失败，清除 tokens
-          this.clearTokens();
-          this.clearUser();
-          // 调用全局401错误处理回调
-          if (this.onUnauthorized) {
-            this.onUnauthorized();
-          }
-          throw new Error("登录已过期，请重新登录");
-        }
-      }
-
-      if (!response.ok) {
-        throw new Error(data.message || `请求失败: ${response.status}`);
-      }
-
-      return data;
-    } catch (error) {
-      clearTimeout(timeoutId);
-
-      if (error instanceof Error) {
-        if (error.name === "AbortError") {
-          throw new Error("请求超时，请检查网络连接");
-        }
-        throw error;
-      }
-      throw new Error("请求发生未知错误");
-    }
   }
 }
 

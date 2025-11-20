@@ -5,13 +5,9 @@ import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
@@ -27,7 +23,6 @@ import {
   Play,
   RefreshCw,
   Clock,
-  Zap,
   Activity,
 } from "lucide-react";
 import { useAIModels } from "../../hooks/use-ai-models";
@@ -37,12 +32,18 @@ import { toast } from "sonner";
 
 interface SimpleBatchAnalysisProps {
   mediaFiles: MediaListItem[];
+  totalFiles?: number;
+  loading?: boolean;
+  onRefresh?: () => void;
   onJobComplete?: (successCount: number, failedCount: number) => void;
   onMediaUpdate?: () => void;
 }
 
 export function SimpleBatchAnalysis({
   mediaFiles,
+  totalFiles = 0,
+  loading = false,
+  onRefresh,
   onJobComplete,
   onMediaUpdate,
 }: SimpleBatchAnalysisProps) {
@@ -65,6 +66,7 @@ export function SimpleBatchAnalysis({
     generateTags: true,
     maxCategories: 5,
     maxTags: 10,
+    concurrency: 2, // 默认并发数
   });
 
   // 过滤出可用的视觉模型
@@ -80,6 +82,17 @@ export function SimpleBatchAnalysis({
   }, [visionModels, selectedModel, modelsLoading]);
 
   const imageFiles = mediaFiles.filter((file) => file.file_type === "image");
+
+  // 获取文件的处理状态
+  const getFileStatus = (fileId: number) => {
+    const task = batchState.tasks.find(t => t.mediaId === fileId);
+    if (!task) return null;
+
+    return {
+      status: task.status,
+      progress: task.progress
+    };
+  };
 
   // 处理文件选择
   const handleFileToggle = (fileId: number, checked: boolean) => {
@@ -127,7 +140,7 @@ export function SimpleBatchAnalysis({
         max_categories: analysisOptions.maxCategories,
         max_tags: analysisOptions.maxTags,
       },
-      1, // concurrencyLimit - 串行处理，避免数据库锁和资源竞争
+      analysisOptions.concurrency, // 使用动态并发设置
       (successCount: number, failedCount: number) => {
         // 任务完成后的处理
         console.log(`🔍 [BATCH] 批量分析完成：成功 ${successCount}，失败 ${failedCount}`);
@@ -143,8 +156,10 @@ export function SimpleBatchAnalysis({
         // 显示成功消息
         toast.success(`批量分析完成！成功: ${successCount}，失败: ${failedCount}`);
 
-        // 重置分析状态
-        resetAnalysis();
+        // 延迟重置分析状态，确保所有内部状态都已完成更新
+        setTimeout(() => {
+          resetAnalysis();
+        }, 500);
 
         if (onJobComplete) {
           onJobComplete(successCount, failedCount);
@@ -194,197 +209,227 @@ export function SimpleBatchAnalysis({
 
   return (
     <Card className="h-full">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Zap className="h-5 w-5" />
-          顺序批量图片分析
-          {batchState.isRunning && (
-            <Badge variant="secondary" className="animate-pulse">
-              处理中
-            </Badge>
-          )}
-        </CardTitle>
-        <CardDescription>
-          顺序处理模式：按顺序逐张分析，确保每张图片完全处理完成后再开始下一张
-        </CardDescription>
-      </CardHeader>
-
-      <CardContent className="space-y-6">
-        {/* 模型选择 */}
-        <div className="space-y-2">
-          <label className="text-sm font-medium">选择AI模型</label>
-          <Select
-            value={selectedModel}
-            onValueChange={setSelectedModel}
-            disabled={batchState.isRunning}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="选择AI模型" />
-            </SelectTrigger>
-            <SelectContent>
-              {visionModels.length === 0 ? (
-                <SelectItem value="none" disabled>
-                  没有可用的视觉模型
-                </SelectItem>
-              ) : (
-                visionModels.map((model, index) => (
-                  <SelectItem key={`model-${model.id || model.name}-${model.endpoint_id || 'default'}-${index}`} value={model.name}>
-                    {model.name}
-                    {model.is_default && <Badge className="ml-2">默认</Badge>}
+      {/* 头部统计和模型选择区域 */}
+      <div className="border-b px-6 py-4">
+        <div className="flex items-center justify-between gap-4">
+          {/* 左侧：模型选择 */}
+          <div className="flex items-center gap-3">
+            <label className="text-sm font-medium whitespace-nowrap">选择AI模型</label>
+            <Select
+              value={selectedModel}
+              onValueChange={setSelectedModel}
+              disabled={batchState.isRunning}
+            >
+              <SelectTrigger className="w-80">
+                <SelectValue placeholder="选择AI模型" />
+              </SelectTrigger>
+              <SelectContent>
+                {visionModels.length === 0 ? (
+                  <SelectItem value="none" disabled>
+                    没有可用的视觉模型
                   </SelectItem>
-                ))
-              )}
-            </SelectContent>
-          </Select>
-        </div>
-
-        {/* 顺序处理说明 */}
-        <div className="text-sm text-muted-foreground bg-blue-50 p-3 rounded-md border border-blue-200">
-          <p className="font-medium text-blue-700 mb-1">🔄 顺序处理模式</p>
-          <p>• 每张图片分析完成后才开始下一张</p>
-          <p>• 确保资源占用稳定，避免超时错误</p>
-          <p>• 实时显示当前处理进度</p>
-        </div>
-
-        {/* 分析选项 */}
-        <div className="space-y-3">
-          <label className="text-sm font-medium">分析选项</label>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                id="generateTitle"
-                checked={analysisOptions.generateTitle}
-                onChange={(e) =>
-                  setAnalysisOptions(prev => ({
-                    ...prev,
-                    generateTitle: e.target.checked
-                  }))
-                }
-                disabled={batchState.isRunning}
-                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-              />
-              <label htmlFor="generateTitle" className="text-sm">
-                生成标题
-              </label>
-            </div>
-            <div className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                id="generateDescription"
-                checked={analysisOptions.generateDescription}
-                onChange={(e) =>
-                  setAnalysisOptions(prev => ({
-                    ...prev,
-                    generateDescription: e.target.checked
-                  }))
-                }
-                disabled={batchState.isRunning}
-                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-              />
-              <label htmlFor="generateDescription" className="text-sm">
-                生成描述
-              </label>
-            </div>
-            <div className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                id="generatePrompt"
-                checked={analysisOptions.generatePrompt}
-                onChange={(e) =>
-                  setAnalysisOptions(prev => ({
-                    ...prev,
-                    generatePrompt: e.target.checked
-                  }))
-                }
-                disabled={batchState.isRunning}
-                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-              />
-              <label htmlFor="generatePrompt" className="text-sm">
-                生成提示词
-              </label>
-            </div>
-            <div className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                id="generateCategories"
-                checked={analysisOptions.generateCategories}
-                onChange={(e) =>
-                  setAnalysisOptions(prev => ({
-                    ...prev,
-                    generateCategories: e.target.checked
-                  }))
-                }
-                disabled={batchState.isRunning}
-                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-              />
-              <label htmlFor="generateCategories" className="text-sm">
-                生成分类
-              </label>
-            </div>
-            <div className="flex items-center space-x-2">
-              <input
-                type="checkbox"
-                id="generateTags"
-                checked={analysisOptions.generateTags}
-                onChange={(e) =>
-                  setAnalysisOptions(prev => ({
-                    ...prev,
-                    generateTags: e.target.checked
-                  }))
-                }
-                disabled={batchState.isRunning}
-                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-              />
-              <label htmlFor="generateTags" className="text-sm">
-                生成标签
-              </label>
-            </div>
+                ) : (
+                  visionModels.map((model, index) => (
+                    <SelectItem key={`model-${model.id || model.name}-${model.endpoint_id || 'default'}-${index}`} value={model.name}>
+                      {model.name}
+                      {model.is_default && <Badge className="ml-2">默认</Badge>}
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
           </div>
 
-          {/* 数量设置 */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1">
-              <label htmlFor="maxCategories" className="text-sm font-medium">
-                最大分类数
-              </label>
-              <input
-                type="number"
-                id="maxCategories"
-                min="1"
-                max="10"
-                value={analysisOptions.maxCategories}
-                onChange={(e) =>
-                  setAnalysisOptions(prev => ({
-                    ...prev,
-                    maxCategories: parseInt(e.target.value) || 5
-                  }))
-                }
-                disabled={batchState.isRunning}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          {/* 右侧：文件统计和刷新 */}
+          <div className="flex items-center gap-2">
+            <Badge variant="secondary" className="text-sm">
+              已加载 {mediaFiles.length} / {totalFiles} 个图片文件
+            </Badge>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onRefresh}
+              disabled={loading}
+            >
+              <RefreshCw
+                className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`}
               />
-            </div>
-            <div className="space-y-1">
-              <label htmlFor="maxTags" className="text-sm font-medium">
-                最大标签数
-              </label>
-              <input
-                type="number"
-                id="maxTags"
-                min="1"
-                max="20"
-                value={analysisOptions.maxTags}
-                onChange={(e) =>
-                  setAnalysisOptions(prev => ({
-                    ...prev,
-                    maxTags: parseInt(e.target.value) || 10
-                  }))
-                }
-                disabled={batchState.isRunning}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-            </div>
+              刷新
+            </Button>
           </div>
+        </div>
+      </div>
+
+      <CardContent className="space-y-6 p-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* 分析选项 Card */}
+          <Card>
+            <CardContent className="p-4">
+              <h3 className="text-sm font-medium mb-4">分析选项</h3>
+              <div className="space-y-3">
+                <div className="flex items-center space-x-3">
+                  <input
+                    type="checkbox"
+                    id="generateTitle"
+                    checked={analysisOptions.generateTitle}
+                    onChange={(e) =>
+                      setAnalysisOptions(prev => ({
+                        ...prev,
+                        generateTitle: e.target.checked
+                      }))
+                    }
+                    disabled={batchState.isRunning}
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 w-4 h-4"
+                  />
+                  <label htmlFor="generateTitle" className="text-sm cursor-pointer">
+                    生成标题
+                  </label>
+                </div>
+                <div className="flex items-center space-x-3">
+                  <input
+                    type="checkbox"
+                    id="generateDescription"
+                    checked={analysisOptions.generateDescription}
+                    onChange={(e) =>
+                      setAnalysisOptions(prev => ({
+                        ...prev,
+                        generateDescription: e.target.checked
+                      }))
+                    }
+                    disabled={batchState.isRunning}
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 w-4 h-4"
+                  />
+                  <label htmlFor="generateDescription" className="text-sm cursor-pointer">
+                    生成描述
+                  </label>
+                </div>
+                <div className="flex items-center space-x-3">
+                  <input
+                    type="checkbox"
+                    id="generatePrompt"
+                    checked={analysisOptions.generatePrompt}
+                    onChange={(e) =>
+                      setAnalysisOptions(prev => ({
+                        ...prev,
+                        generatePrompt: e.target.checked
+                      }))
+                    }
+                    disabled={batchState.isRunning}
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 w-4 h-4"
+                  />
+                  <label htmlFor="generatePrompt" className="text-sm cursor-pointer">
+                    生成提示词
+                  </label>
+                </div>
+                <div className="flex items-center space-x-3">
+                  <input
+                    type="checkbox"
+                    id="generateCategories"
+                    checked={analysisOptions.generateCategories}
+                    onChange={(e) =>
+                      setAnalysisOptions(prev => ({
+                        ...prev,
+                        generateCategories: e.target.checked
+                      }))
+                    }
+                    disabled={batchState.isRunning}
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 w-4 h-4"
+                  />
+                  <label htmlFor="generateCategories" className="text-sm cursor-pointer">
+                    生成分类
+                  </label>
+                </div>
+                <div className="flex items-center space-x-3">
+                  <input
+                    type="checkbox"
+                    id="generateTags"
+                    checked={analysisOptions.generateTags}
+                    onChange={(e) =>
+                      setAnalysisOptions(prev => ({
+                        ...prev,
+                        generateTags: e.target.checked
+                      }))
+                    }
+                    disabled={batchState.isRunning}
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 w-4 h-4"
+                  />
+                  <label htmlFor="generateTags" className="text-sm cursor-pointer">
+                    生成标签
+                  </label>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* 数量设置 Card */}
+          <Card>
+            <CardContent className="p-4">
+              <h3 className="text-sm font-medium mb-4">数量设置</h3>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <label htmlFor="maxCategories" className="text-sm text-gray-600 font-medium">
+                    最大分类数
+                  </label>
+                  <input
+                    type="number"
+                    id="maxCategories"
+                    min="1"
+                    max="10"
+                    value={analysisOptions.maxCategories}
+                    onChange={(e) =>
+                      setAnalysisOptions(prev => ({
+                        ...prev,
+                        maxCategories: parseInt(e.target.value) || 5
+                      }))
+                    }
+                    disabled={batchState.isRunning}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label htmlFor="maxTags" className="text-sm text-gray-600 font-medium">
+                    最大标签数
+                  </label>
+                  <input
+                    type="number"
+                    id="maxTags"
+                    min="1"
+                    max="20"
+                    value={analysisOptions.maxTags}
+                    onChange={(e) =>
+                      setAnalysisOptions(prev => ({
+                        ...prev,
+                        maxTags: parseInt(e.target.value) || 10
+                      }))
+                    }
+                    disabled={batchState.isRunning}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label htmlFor="concurrency" className="text-sm text-gray-600 font-medium">
+                    并发数
+                  </label>
+                  <input
+                    type="number"
+                    id="concurrency"
+                    min="1"
+                    max="5"
+                    value={analysisOptions.concurrency}
+                    onChange={(e) =>
+                      setAnalysisOptions(prev => ({
+                        ...prev,
+                        concurrency: Math.min(5, Math.max(1, parseInt(e.target.value) || 2))
+                      }))
+                    }
+                    disabled={batchState.isRunning}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                  <p className="text-xs text-gray-500">同时处理的图片数量（1-5）</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </div>
 
         {/* 文件选择 */}
@@ -402,49 +447,66 @@ export function SimpleBatchAnalysis({
           </div>
 
           <div className="max-h-40 overflow-y-auto border rounded-md p-2">
-            {imageFiles.map((file) => (
-              <div key={file.id} className="flex items-center gap-2 p-1">
-                <Checkbox
-                  id={`file-${file.id}`}
-                  checked={selectedFiles.includes(file.id)}
-                  onCheckedChange={(checked) =>
-                    handleFileToggle(file.id, checked as boolean)
-                  }
-                  disabled={batchState.isRunning}
-                />
-                <label
-                  htmlFor={`file-${file.id}`}
-                  className="text-sm cursor-pointer flex-1 truncate"
-                >
-                  {file.title || `图片 ${file.id}`}
-                </label>
-                <Badge variant="outline" className="text-xs">
-                  {Math.round((file.file_size || 0) / 1024)}KB
-                </Badge>
-              </div>
-            ))}
-          </div>
-        </div>
+            {imageFiles.map((file) => {
+              const fileStatus = getFileStatus(file.id);
+              return (
+                <div key={file.id} className="flex items-center gap-2 p-1">
+                  <Checkbox
+                    id={`file-${file.id}`}
+                    checked={selectedFiles.includes(file.id)}
+                    onCheckedChange={(checked) =>
+                      handleFileToggle(file.id, checked as boolean)
+                    }
+                    disabled={batchState.isRunning}
+                  />
+                  <label
+                    htmlFor={`file-${file.id}`}
+                    className="text-sm cursor-pointer flex-1 truncate"
+                  >
+                    {file.title || `图片 ${file.id}`}
+                  </label>
+                  <Badge variant="outline" className="text-xs">
+                    {Math.round((file.file_size || 0) / 1024)}KB
+                  </Badge>
 
-        {/* 分析选项说明 */}
-        <div className="text-xs text-muted-foreground bg-muted p-3 rounded-md">
-          <p className="font-medium mb-1">🔄 顺序批量处理特性：</p>
-          <p>• 顺序处理：每张图片分析完成后才开始下一张</p>
-          <p>• 智能轮询：实时监听单个任务状态，完成后立即开始下一个</p>
-          <p>• 状态同步：确保数据一致性，避免并发冲突</p>
-          <p>• 容错重试：自动处理失败任务，继续处理下一张</p>
-          <p>• 自动保存：完成后自动同步到媒体库，支持跨标签页更新</p>
-          {batchState.isRunning && <p className="text-blue-600 mt-1">• 当前正在处理第 {batchState.completed + batchState.failed + batchState.processing + 1} 张图片...</p>}
+                  {/* 状态显示 */}
+                  {fileStatus && (
+                    <div className="flex items-center gap-1">
+                      {fileStatus.status === 'processing' && (
+                        <div className="flex items-center gap-1 text-blue-600">
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                          <span className="text-xs">处理中</span>
+                        </div>
+                      )}
+                      {fileStatus.status === 'completed' && (
+                        <div className="flex items-center gap-1 text-green-600">
+                          <CheckCircle className="h-3 w-3" />
+                          <span className="text-xs">完成</span>
+                        </div>
+                      )}
+                      {fileStatus.status === 'failed' && (
+                        <div className="flex items-center gap-1 text-red-600">
+                          <AlertCircle className="h-3 w-3" />
+                          <span className="text-xs">失败</span>
+                        </div>
+                      )}
+                      {fileStatus.status === 'pending' && (
+                        <div className="flex items-center gap-1 text-gray-500">
+                          <Clock className="h-3 w-3" />
+                          <span className="text-xs">等待中</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
 
         {/* 进度显示 */}
         {batchState.total > 0 && (
           <div className="space-y-2">
-            {batchState.isRunning && (
-              <div className="text-sm font-medium text-blue-600">
-                当前处理第 {batchState.completed + batchState.failed + batchState.processing + 1}/{batchState.total} 张图片
-              </div>
-            )}
             <div className="flex justify-between text-sm">
               <span>总体进度</span>
               <span>
@@ -515,17 +577,7 @@ export function SimpleBatchAnalysis({
           )}
         </div>
 
-        {/* 顺序处理提示 */}
-        {batchState.isRunning && (
-          <Alert>
-            <Activity className="h-4 w-4" />
-            <AlertDescription>
-              <strong>顺序处理模式：</strong>正在按顺序逐张分析图片，确保每张图片完全处理完成后再开始下一张。
-              系统会实时监控每张图片的分析状态，当前正在处理第 {batchState.completed + batchState.failed + batchState.processing + 1} 张。
-            </AlertDescription>
-          </Alert>
-        )}
-      </CardContent>
+        </CardContent>
     </Card>
   );
 }

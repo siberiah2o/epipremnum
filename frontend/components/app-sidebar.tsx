@@ -53,24 +53,29 @@ const data = {
       ],
     },
     {
-      title: "AI 工具",
+      title: "新AI工作台",
       url: "#",
       items: [
         {
-          title: "AI 分析",
-          url: "/dashboard/ai/analysis",
-        },
-        {
-          title: "批量处理",
-          url: "/dashboard/ai/batch",
+          title: "工作台首页",
+          url: "/dashboard/new_ai",
+          isActive: true,
         },
         {
           title: "模型管理",
-          url: "/dashboard/ai/models",
+          url: "/dashboard/new_ai/models",
         },
         {
-          title: "使用统计",
-          url: "/dashboard/ai/stats",
+          title: "图片分析",
+          url: "/dashboard/new_ai/analysis",
+        },
+        {
+          title: "批量处理",
+          url: "/dashboard/new_ai/batch",
+        },
+        {
+          title: "数据分析",
+          url: "/dashboard/new_ai/stats",
         },
       ],
     },

@@ -55,6 +55,10 @@ export function useAsyncBatchAnalysis() {
       const processing = updatedTasks.filter((t) => t.status === 'processing').length;
       const pending = updatedTasks.filter((t) => t.status === 'pending').length;
 
+      // 检查是否所有任务都已完成
+      const allCompleted = updatedTasks.length > 0 &&
+        updatedTasks.every(task => task.status === 'completed' || task.status === 'failed');
+
       return {
         ...prev,
         tasks: updatedTasks,
@@ -62,6 +66,8 @@ export function useAsyncBatchAnalysis() {
         failed,
         processing,
         pending,
+        // 只有在所有任务都完成时才设置 isRunning 为 false
+        isRunning: prev.isRunning && !allCompleted,
       };
     });
   }, []);
@@ -242,10 +248,19 @@ export function useAsyncBatchAnalysis() {
       // 等待所有任务完成（不包括轮询）
       await Promise.all(analysisPromises);
 
+      // 确保所有任务都已完成后再停止运行状态
+      setState((prev) => {
+        const allCompleted = prev.tasks.every(task => task.status === 'completed' || task.status === 'failed');
+        return {
+          ...prev,
+          isRunning: !allCompleted
+        };
+      });
+
     } catch (error: any) {
       console.error("批量分析失败:", error);
       toast.error(`批量分析失败: ${error.message}`);
-    } finally {
+      // 确保异常时也重置运行状态
       setState((prev) => ({ ...prev, isRunning: false }));
     }
   };

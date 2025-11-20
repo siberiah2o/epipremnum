@@ -58,7 +58,8 @@ INSTALLED_APPS = [
     'corsheaders',
     'users',
     'media',
-    'ollama_ai',
+    'llms',
+    'django_async_manager',
 ]
 
 MIDDLEWARE = [
@@ -187,4 +188,52 @@ SIMPLE_JWT = {
     'USER_ID_CLAIM': 'user_id',
     'AUTH_TOKEN_CLASSES': ('rest_framework_simplejwt.tokens.AccessToken',),
     'TOKEN_TYPE_CLAIM': 'token_type',
+}
+
+# Django Async Manager Configuration
+ASYNC_MANAGER = {
+    'MAX_WORKERS': 4,  # 最大工作进程数
+    'QUEUE_TIMEOUT': 300,  # 队列超时时间（秒）
+    'TASK_TIMEOUT': 600,  # 任务超时时间（秒）
+    'MAX_RETRIES': 3,  # 最大重试次数
+    'RETRY_DELAY': 60,  # 重试延迟（秒）
+    'ENABLE_SCHEDULER': True,  # 启用定时任务调度器
+}
+
+# Logging Configuration
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
+            'style': '{',
+        },
+        'simple': {
+            'format': '{levelname} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': 'INFO',
+    },
+    'loggers': {
+        'llms': {
+            'handlers': ['console'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'django_async_manager': {
+            'handlers': ['console'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+    },
 }
