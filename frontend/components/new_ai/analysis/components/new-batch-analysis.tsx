@@ -85,7 +85,7 @@ export function NewBatchAnalysis({
   const { state: batchState, performBatchAnalysis, resetState, isPolling } = useAsyncBatchAnalysis();
 
   // 并发控制状态
-  const [concurrencyLimit, setConcurrencyLimit] = useState(3); // 默认3个并发
+  const [concurrencyLimit, setConcurrencyLimit] = useState(2); // 默认2个并发
 
   // 分析选项
   const [analysisOptions, setAnalysisOptions] = useState({
@@ -719,106 +719,18 @@ export function NewBatchAnalysis({
           )}
         </div>
 
-        {/* 并发控制设置 */}
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <Settings className="h-4 w-4" />
-            <label className="text-sm font-medium">并发控制设置</label>
-          </div>
-          <div className="border rounded-md p-4 space-y-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">并发数量</label>
-              <Select
-                value={concurrencyLimit.toString()}
-                onValueChange={(value) => setConcurrencyLimit(parseInt(value))}
-                disabled={isRunning}
-              >
-                <SelectTrigger className="w-32">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((num) => (
-                    <SelectItem key={num} value={num.toString()}>
-                      {num}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">
-                同时处理的文件数量，建议根据服务器性能调整 (1-10)
-              </p>
+        
+        {/* 分析选项 - 紧凑版本 */}
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Settings className="h-4 w-4 text-muted-foreground" />
+              <label className="text-sm font-medium">分析选项</label>
             </div>
 
-            <div className="space-y-2">
-              <label className="text-sm font-medium">队列响应延迟</label>
-              <Select
-                value={delayBetweenRequests.toString()}
-                onValueChange={(value) =>
-                  setDelayBetweenRequests(parseInt(value))
-                }
-                disabled={isRunning}
-              >
-                <SelectTrigger className="w-32">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {[0, 50, 100, 200, 500, 1000].map((num) => (
-                    <SelectItem key={num} value={num.toString()}>
-                      {num}ms
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">
-                队列管理响应时间，检测任务完成后的启动新任务的延迟 (建议50ms)
-              </p>
-            </div>
-
-            <div className="flex items-center space-x-4">
-              <label className="flex items-center space-x-2">
-                <input
-                  type="checkbox"
-                  checked={autoRetry}
-                  onChange={(e) => setAutoRetry(e.target.checked)}
-                  disabled={isRunning}
-                />
-                <span className="text-sm">自动重试失败的任务</span>
-              </label>
-
-              {autoRetry && (
-                <div className="flex items-center space-x-2">
-                  <label className="text-sm">最大重试次数:</label>
-                  <Select
-                    value={maxRetries.toString()}
-                    onValueChange={(value) => setMaxRetries(parseInt(value))}
-                    disabled={isRunning}
-                  >
-                    <SelectTrigger className="w-16">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {[1, 2, 3, 5].map((num) => (
-                        <SelectItem key={num} value={num.toString()}>
-                          {num}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* 分析选项 */}
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <Settings className="h-4 w-4" />
-            <label className="text-sm font-medium">分析选项</label>
-          </div>
-          <div className="border rounded-md p-4 space-y-4">
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-              <label className="flex items-center space-x-2">
+            {/* 生成选项 */}
+            <div className="flex flex-wrap gap-2 mb-3">
+              <label className="flex items-center space-x-1 text-sm">
                 <input
                   type="checkbox"
                   checked={analysisOptions.generateTitle}
@@ -830,9 +742,9 @@ export function NewBatchAnalysis({
                   }
                   disabled={isRunning}
                 />
-                <span className="text-sm">生成标题</span>
+                <span>标题</span>
               </label>
-              <label className="flex items-center space-x-2">
+              <label className="flex items-center space-x-1 text-sm">
                 <input
                   type="checkbox"
                   checked={analysisOptions.generateDescription}
@@ -844,9 +756,9 @@ export function NewBatchAnalysis({
                   }
                   disabled={isRunning}
                 />
-                <span className="text-sm">生成描述</span>
+                <span>描述</span>
               </label>
-              <label className="flex items-center space-x-2">
+              <label className="flex items-center space-x-1 text-sm">
                 <input
                   type="checkbox"
                   checked={analysisOptions.generatePrompt}
@@ -858,9 +770,9 @@ export function NewBatchAnalysis({
                   }
                   disabled={isRunning}
                 />
-                <span className="text-sm">生成提示词</span>
+                <span>提示词</span>
               </label>
-              <label className="flex items-center space-x-2">
+              <label className="flex items-center space-x-1 text-sm">
                 <input
                   type="checkbox"
                   checked={analysisOptions.generateCategories}
@@ -872,9 +784,9 @@ export function NewBatchAnalysis({
                   }
                   disabled={isRunning}
                 />
-                <span className="text-sm">生成分类</span>
+                <span>分类</span>
               </label>
-              <label className="flex items-center space-x-2">
+              <label className="flex items-center space-x-1 text-sm">
                 <input
                   type="checkbox"
                   checked={analysisOptions.generateTags}
@@ -886,27 +798,80 @@ export function NewBatchAnalysis({
                   }
                   disabled={isRunning}
                 />
-                <span className="text-sm">生成标签</span>
+                <span>标签</span>
               </label>
             </div>
-            {analysisOptions.generateCategories && (
-              <div className="flex items-center space-x-2">
-                <label className="text-sm">最大分类数:</label>
+
+            {/* 数量设置和并发控制 */}
+            <div className="flex items-center gap-4 text-sm">
+              {analysisOptions.generateCategories && (
+                <div className="flex items-center gap-1">
+                  <label className="text-muted-foreground">分类数:</label>
+                  <Select
+                    value={analysisOptions.maxCategories.toString()}
+                    onValueChange={(value) =>
+                      setAnalysisOptions({
+                        ...analysisOptions,
+                        maxCategories: parseInt(value),
+                      })
+                    }
+                    disabled={isRunning}
+                  >
+                    <SelectTrigger className="w-16 h-8">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {[1, 3, 5, 8, 10].map((num) => (
+                        <SelectItem key={num} value={num.toString()}>
+                          {num}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              {analysisOptions.generateTags && (
+                <div className="flex items-center gap-1">
+                  <label className="text-muted-foreground">标签数:</label>
+                  <Select
+                    value={analysisOptions.maxTags.toString()}
+                    onValueChange={(value) =>
+                      setAnalysisOptions({
+                        ...analysisOptions,
+                        maxTags: parseInt(value),
+                      })
+                    }
+                    disabled={isRunning}
+                  >
+                    <SelectTrigger className="w-16 h-8">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {[5, 8, 10, 15, 20].map((num) => (
+                        <SelectItem key={num} value={num.toString()}>
+                          {num}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              <div className="flex items-center gap-1">
+                <label className="text-muted-foreground">并发:</label>
                 <Select
-                  value={analysisOptions.maxCategories.toString()}
+                  value={concurrencyLimit.toString()}
                   onValueChange={(value) =>
-                    setAnalysisOptions({
-                      ...analysisOptions,
-                      maxCategories: parseInt(value),
-                    })
+                    setConcurrencyLimit(parseInt(value))
                   }
                   disabled={isRunning}
                 >
-                  <SelectTrigger className="w-20">
+                  <SelectTrigger className="w-16 h-8">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {[1, 3, 5, 8, 10].map((num) => (
+                    {[1, 2, 3, 4, 5].map((num) => (
                       <SelectItem key={num} value={num.toString()}>
                         {num}
                       </SelectItem>
@@ -914,35 +879,9 @@ export function NewBatchAnalysis({
                   </SelectContent>
                 </Select>
               </div>
-            )}
-            {analysisOptions.generateTags && (
-              <div className="flex items-center space-x-2">
-                <label className="text-sm">最大标签数:</label>
-                <Select
-                  value={analysisOptions.maxTags.toString()}
-                  onValueChange={(value) =>
-                    setAnalysisOptions({
-                      ...analysisOptions,
-                      maxTags: parseInt(value),
-                    })
-                  }
-                  disabled={isRunning}
-                >
-                  <SelectTrigger className="w-20">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {[5, 8, 10, 15, 20].map((num) => (
-                      <SelectItem key={num} value={num.toString()}>
-                        {num}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-          </div>
-        </div>
+            </div>
+          </CardContent>
+        </Card>
 
         {/* 文件选择 */}
         <div className="space-y-3">
