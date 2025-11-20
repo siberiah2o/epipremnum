@@ -163,58 +163,68 @@ export function useAsyncBatchAnalysis() {
           const taskResult = response.data || response;
 
           if (taskResult && (taskResult.analysis_id || taskResult.task_id)) {
-            // 添加到轮询任务
-            const pollingTask = addTask(taskResult);
+            // 添加到轮询任务，传入回调函数
+            const pollingTask = addTask(
+              taskResult,
+              // 完成回调
+              (completedTask) => {
+                console.log(`🔍 [BATCH] 轮询回调：文件 ${file.id} 分析完成，释放并发控制`);
+                updateTaskStatus(file.id, {
+                  status: 'completed',
+                  progress: 100,
+                  result: completedTask.result
+                });
 
-            // 等待任务真正完成（成功或失败）
-            return new Promise<void>((resolve) => {
-              // 监听任务状态变化
-              const checkInterval = setInterval(() => {
-                const currentTask = getTaskByMediaId(file.id);
-
-                if (currentTask) {
-                  updateTaskStatus(file.id, {
-                    progress: currentTask.progress,
-                  });
-
-                  // 检查任务是否真正完成
-                  if (currentTask.status === 'completed' && currentTask.result) {
-                    clearInterval(checkInterval);
-                    console.log(`🔍 [BATCH] 文件 ${file.id} 分析成功完成，释放并发控制`);
-                    updateTaskStatus(file.id, { status: 'completed', progress: 100, result: currentTask.result });
-
-                    if (onTaskComplete) {
-                      onTaskComplete(file.id, currentTask.result);
-                    }
-
-                    // 只有在分析真正成功后才释放信号量
-                    semaphore.release();
-                    resolve();
-                  } else if (currentTask.status === 'failed') {
-                    clearInterval(checkInterval);
-                    console.log(`🔍 [BATCH] 文件 ${file.id} 分析失败，释放并发控制:`, currentTask.error);
-                    updateTaskStatus(file.id, { status: 'failed', error: currentTask.error });
-
-                    // 失败时也要释放信号量
-                    semaphore.release();
-                    resolve(); // 不reject，让其他任务继续
-                  }
+                if (onTaskComplete) {
+                  onTaskComplete(file.id, completedTask.result);
                 }
-              }, 2000); // 每2秒检查一次，减少轮询频率
 
-              // 设置最大等待时间
-              setTimeout(() => {
-                clearInterval(checkInterval);
-                console.log(`🔍 [BATCH] 文件 ${file.id} 超时，释放并发控制`);
+                // 分析完成后释放信号量
+                semaphore.release();
+              },
+              // 错误回调
+              (failedTask) => {
+                console.log(`🔍 [BATCH] 轮询回调：文件 ${file.id} 分析失败，释放并发控制:`, failedTask.error);
+                updateTaskStatus(file.id, {
+                  status: 'failed',
+                  error: failedTask.error || '分析失败'
+                });
+
+                // 失败时也要释放信号量
+                semaphore.release();
+              }
+            );
+
+            // 等待任务真正完成（成功或失败）- 使用回调函数
+            return new Promise<void>((resolve) => {
+              console.log(`🔍 [BATCH] 等待文件 ${file.id} 分析完成...`);
+
+              // 添加超时检查，防止任务卡住
+              const timeoutCheck = setTimeout(() => {
+                console.log(`🔍 [BATCH] 文件 ${file.id} 超时检查`);
                 const currentTask = getTaskByMediaId(file.id);
                 if (currentTask && currentTask.status !== 'completed' && currentTask.status !== 'failed') {
+                  console.log(`🔍 [BATCH] 文件 ${file.id} 确实超时，强制释放并发控制`);
                   updateTaskStatus(file.id, { status: 'failed', error: '任务超时' });
+                  semaphore.release();
+                  resolve();
                 }
-
-                // 超时时释放信号量
-                semaphore.release();
-                resolve();
               }, 600000); // 10分钟超时
+
+              // 通过观察任务状态变化来判断完成
+              const checkCompletion = () => {
+                const currentTask = getTaskByMediaId(file.id);
+                if (currentTask && (currentTask.status === 'completed' || currentTask.status === 'failed')) {
+                  clearTimeout(timeoutCheck);
+                  console.log(`🔍 [BATCH] 文件 ${file.id} 通过状态检查确认完成: ${currentTask.status}`);
+                  resolve();
+                } else {
+                  setTimeout(checkCompletion, 1000); // 每秒检查一次
+                }
+              };
+
+              // 开始检查
+              setTimeout(checkCompletion, 1000);
             });
           } else {
             // API调用失败，立即释放
