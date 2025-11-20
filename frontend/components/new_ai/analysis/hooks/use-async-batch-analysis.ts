@@ -250,23 +250,8 @@ export function useAsyncBatchAnalysis() {
     }
   };
 
-  // 监听任务完成
-  useEffect(() => {
-    if (state.isRunning && state.completed + state.failed === state.total && state.total > 0) {
-      const successCount = state.completed;
-      const failedCount = state.failed;
-
-      toast.success(`批量分析完成！成功: ${successCount}，失败: ${failedCount}`);
-
-      // 触发全局媒体更新事件
-      window.dispatchEvent(new CustomEvent("media-updated"));
-      localStorage.setItem("media-analysis-completed", Date.now().toString());
-
-      setTimeout(() => {
-        localStorage.removeItem("media-analysis-completed");
-      }, 1000);
-    }
-  }, [state.isRunning, state.completed, state.failed, state.total]);
+  // 注意：任务完成处理现在由组件中的 onJobComplete 回调处理
+  // 这里不再自动触发，避免与组件回调冲突
 
   const resetState = useCallback(() => {
     setState({

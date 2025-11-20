@@ -132,6 +132,17 @@ export function SimpleBatchAnalysis({
         // 任务完成后的处理
         console.log(`🔍 [BATCH] 批量分析完成：成功 ${successCount}，失败 ${failedCount}`);
 
+        // 触发全局媒体更新事件
+        window.dispatchEvent(new CustomEvent("media-updated"));
+        localStorage.setItem("media-analysis-completed", Date.now().toString());
+
+        setTimeout(() => {
+          localStorage.removeItem("media-analysis-completed");
+        }, 1000);
+
+        // 显示成功消息
+        toast.success(`批量分析完成！成功: ${successCount}，失败: ${failedCount}`);
+
         // 重置分析状态
         resetAnalysis();
 
