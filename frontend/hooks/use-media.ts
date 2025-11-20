@@ -544,22 +544,15 @@ export function useMediaUpload() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [progress, setProgress] = useState(0)
+  const [currentFileIndex, setCurrentFileIndex] = useState(0)
+  const [totalFiles, setTotalFiles] = useState(0)
 
   const uploadMedia = async (data: UploadMediaData) => {
     setIsLoading(true)
     setError(null)
-    setProgress(0)
 
     try {
-      // 模拟上传进度
-      const progressInterval = setInterval(() => {
-        setProgress(prev => Math.min(prev + 10, 90))
-      }, 200)
-
       const response = await apiClient.uploadMedia(data)
-
-      clearInterval(progressInterval)
-      setProgress(100)
 
       if (response.code === 200 || response.code === 201) {
         return { success: true, data: response.data }
@@ -571,16 +564,73 @@ export function useMediaUpload() {
       const message = err instanceof Error ? err.message : '上传媒体文件失败'
       setError(message)
       return { success: false, message }
-    } finally {
-      setIsLoading(false)
-      setTimeout(() => setProgress(0), 1000)
     }
+  }
+
+  // 新增：批量上传方法，支持进度显示
+  const uploadMultipleMedia = async (files: File[], generateUploadData: (file: File, index: number) => UploadMediaData) => {
+    setIsLoading(true)
+    setError(null)
+    setProgress(0)
+    setTotalFiles(files.length)
+
+    let successCount = 0
+    let failureCount = 0
+
+    for (let i = 0; i < files.length; i++) {
+      setCurrentFileIndex(i + 1)
+      const file = files[i]
+      const uploadData = generateUploadData(file, i)
+
+      console.log(`Uploading file ${i + 1}/${files.length}:`, file.name)
+
+      try {
+        const response = await apiClient.uploadMedia(uploadData)
+        if (response.code === 200 || response.code === 201) {
+          successCount++
+        } else {
+          failureCount++
+          setError(response.message)
+        }
+      } catch (err) {
+        failureCount++
+        const message = err instanceof Error ? err.message : '上传媒体文件失败'
+        setError(message)
+      }
+
+      // 更新进度
+      const currentProgress = Math.round(((i + 1) / files.length) * 100)
+      setProgress(currentProgress)
+    }
+
+    // 重置状态
+    setIsLoading(false)
+    setCurrentFileIndex(0)
+    setTotalFiles(0)
+
+    return {
+      successCount,
+      failureCount,
+      totalFiles: files.length
+    }
+  }
+
+  // 手动重置进度的方法
+  const resetProgress = () => {
+    setProgress(0)
+    setCurrentFileIndex(0)
+    setTotalFiles(0)
+    setError(null)
   }
 
   return {
     uploadMedia,
+    uploadMultipleMedia,
     isLoading,
     error,
-    progress
+    progress,
+    currentFileIndex,
+    totalFiles,
+    resetProgress
   }
 }
