@@ -127,7 +127,7 @@ export function SimpleBatchAnalysis({
         max_categories: analysisOptions.maxCategories,
         max_tags: analysisOptions.maxTags,
       },
-      3, // concurrencyLimit
+      1, // concurrencyLimit - 串行处理，避免数据库锁和资源竞争
       (successCount: number, failedCount: number) => {
         // 任务完成后的处理
         if (onJobComplete) {
