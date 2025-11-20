@@ -1,13 +1,13 @@
 'use client'
 
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { useMediaUpload } from '@/hooks/use-media'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Progress } from '@/components/ui/progress'
 import { toast } from 'sonner'
-import { Upload, X, Plus } from 'lucide-react'
+import { Upload, X, Plus, ChevronLeft, ChevronRight } from 'lucide-react'
 import { FileIcon } from '@/components/ui/file-icon'
 import { isUploadable, guessFileTypeFromFileName, getFileInfo } from '@/lib/file-utils'
 
@@ -17,7 +17,25 @@ export function MediaUpload() {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([])
   const [previewUrls, setPreviewUrls] = useState<Map<string, string>>(new Map())
   const [isDragging, setIsDragging] = useState(false)
+  const [currentPage, setCurrentPage] = useState(1)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // 分页配置
+  const FILES_PER_PAGE = 20
+  const totalPages = Math.ceil(selectedFiles.length / FILES_PER_PAGE)
+  const startIndex = (currentPage - 1) * FILES_PER_PAGE
+  const endIndex = startIndex + FILES_PER_PAGE
+  const currentFiles = selectedFiles.slice(startIndex, endIndex)
+
+  // 当文件列表变化时重置到第一页
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [selectedFiles.length])
+
+  // 处理页面变化
+  const handlePageChange = (newPage: number) => {
+    setCurrentPage(Math.max(1, Math.min(newPage, totalPages)))
+  }
 
   const handleFileSelect = useCallback((files: FileList | File[]) => {
     const fileArray = Array.from(files)
@@ -220,63 +238,99 @@ export function MediaUpload() {
                 <div className="space-y-4">
                   <div className="text-center">
                     <p className="text-lg font-medium">已选择 {selectedFiles.length} 个文件</p>
-                    <p className="text-sm text-muted-foreground">总大小: {(selectedFiles.reduce((sum, f) => sum + f.size, 0) / 1024 / 1024).toFixed(2)} MB</p>
+                    <p className="text-sm text-muted-foreground">
+                      总大小: {(selectedFiles.reduce((sum, f) => sum + f.size, 0) / 1024 / 1024).toFixed(2)} MB
+                      {totalPages > 1 && ` • 显示第 ${startIndex + 1}-${Math.min(endIndex, selectedFiles.length)} 个`}
+                    </p>
                   </div>
 
                   {/* 文件列表 */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-64 overflow-y-auto">
-                    {selectedFiles.map((file, index) => {
-                      const previewUrl = previewUrls.get(file.name + file.size)
-                      const fileType = guessFileTypeFromFileName(file.name)
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-64 overflow-y-auto">
+                      {currentFiles.map((file, index) => {
+                        const previewUrl = previewUrls.get(file.name + file.size)
+                        const fileType = guessFileTypeFromFileName(file.name)
 
-                      return (
-                        <div
-                          key={`${file.name}-${file.size}-${index}`}
-                          className="relative border rounded-lg p-3 bg-background hover:bg-muted/50 transition-colors"
-                        >
-                          {/* 文件预览/图标 */}
-                          <div className="flex items-center gap-3">
-                            {previewUrl ? (
-                              <div className="relative w-12 h-12 rounded overflow-hidden flex-shrink-0">
-                                <img
-                                  src={previewUrl}
-                                  alt={file.name}
-                                  className="w-full h-full object-cover"
-                                />
-                              </div>
-                            ) : (
-                              <div className="w-12 h-12 rounded bg-muted flex items-center justify-center flex-shrink-0">
-                                <FileIcon mimeType={fileType} size="sm" className="text-muted-foreground" />
-                              </div>
-                            )}
+                        return (
+                          <div
+                            key={`${file.name}-${file.size}-${startIndex + index}`}
+                            className="relative border rounded-lg p-3 bg-background hover:bg-muted/50 transition-colors"
+                          >
+                            {/* 文件预览/图标 */}
+                            <div className="flex items-center gap-3">
+                              {previewUrl ? (
+                                <div className="relative w-12 h-12 rounded overflow-hidden flex-shrink-0">
+                                  <img
+                                    src={previewUrl}
+                                    alt={file.name}
+                                    className="w-full h-full object-cover"
+                                  />
+                                </div>
+                              ) : (
+                                <div className="w-12 h-12 rounded bg-muted flex items-center justify-center flex-shrink-0">
+                                  <FileIcon mimeType={fileType} size="sm" className="text-muted-foreground" />
+                                </div>
+                              )}
 
-                            {/* 文件信息 */}
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium truncate" title={file.name}>
-                                {file.name}
-                              </p>
-                              <p className="text-xs text-muted-foreground">
-                                {getFileInfo(fileType).displayName} • {(file.size / 1024 / 1024).toFixed(2)} MB
-                              </p>
+                              {/* 文件信息 */}
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium truncate" title={file.name}>
+                                  {file.name}
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                  {getFileInfo(fileType).displayName} • {(file.size / 1024 / 1024).toFixed(2)} MB
+                                </p>
+                              </div>
+
+                              {/* 移除按钮 */}
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0 flex-shrink-0"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleRemoveFile(file)
+                                }}
+                              >
+                                <X className="h-4 w-4" />
+                              </Button>
                             </div>
-
-                            {/* 移除按钮 */}
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0 flex-shrink-0"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                handleRemoveFile(file)
-                              }}
-                            >
-                              <X className="h-4 w-4" />
-                            </Button>
                           </div>
-                        </div>
-                      )
-                    })}
+                        )
+                      })}
+                    </div>
+
+                    {/* 分页控件 */}
+                    {totalPages > 1 && (
+                      <div className="flex items-center justify-center gap-2 pt-2 border-t">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handlePageChange(currentPage - 1)}
+                          disabled={currentPage === 1}
+                          className="h-8 w-8 p-0"
+                        >
+                          <ChevronLeft className="h-4 w-4" />
+                        </Button>
+
+                        <span className="text-sm text-muted-foreground px-3">
+                          {currentPage} / {totalPages} 页
+                        </span>
+
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handlePageChange(currentPage + 1)}
+                          disabled={currentPage === totalPages}
+                          className="h-8 w-8 p-0"
+                        >
+                          <ChevronRight className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    )}
                   </div>
 
                   {/* 添加更多文件按钮 */}
