@@ -39,7 +39,9 @@ export default function NewAIModelsPage() {
               </BreadcrumbItem>
               <BreadcrumbSeparator className="hidden md:block" />
               <BreadcrumbItem>
-                <BreadcrumbLink href="/dashboard/new_ai">新AI工作台</BreadcrumbLink>
+                <BreadcrumbLink href="/dashboard/new_ai">
+                  新AI工作台
+                </BreadcrumbLink>
               </BreadcrumbItem>
               <BreadcrumbSeparator className="hidden md:block" />
               <BreadcrumbItem>
@@ -51,16 +53,7 @@ export default function NewAIModelsPage() {
             </BreadcrumbList>
           </Breadcrumb>
         </header>
-        <div className="flex flex-1 flex-col gap-4 p-4 pt-0">
-          <div className="space-y-1">
-            <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-              <Brain className="h-6 w-6" />
-              AI 模型管理
-            </h1>
-            <p className="text-muted-foreground">
-              管理 Ollama AI 模型和配置服务端点，支持视觉模型和批量分析功能
-            </p>
-          </div>
+        <div className="flex flex-1 flex-col gap-4 p-4">
           <NewAIManagement />
         </div>
       </SidebarInset>

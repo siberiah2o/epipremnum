@@ -59,17 +59,21 @@ INSTALLED_APPS = [
     'users',
     'media',
     'llms',
+    'ollama',  # 添加 ollama 应用
     'django_async_manager',
+    'utils',  # 添加工具包应用
 ]
 
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    'utils.middleware.DatabaseOptimizationMiddleware',  # 数据库优化中间件
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     # 'django.middleware.csrf.CsrfViewMiddleware',  # 注释掉 CSRF 中间件，适用于纯 API
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
+    'utils.middleware.DatabaseHealthMiddleware',  # 数据库健康监控中间件
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
@@ -100,6 +104,12 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / 'db.sqlite3',
+        'OPTIONS': {
+            'timeout': 60,  # 进一步增加到60秒超时
+            'check_same_thread': False,
+            # 更激进的SQLite优化配置
+            'init_command': "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA cache_size=-128000; PRAGMA temp_store=memory; PRAGMA busy_timeout=60000; PRAGMA wal_autocheckpoint=1000; PRAGMA mmap_size=268435456; PRAGMA locking_mode=NORMAL; PRAGMA auto_vacuum=INCREMENTAL; PRAGMA journal_size_limit=67108864;",
+        }
     }
 }
 
@@ -190,14 +200,16 @@ SIMPLE_JWT = {
     'TOKEN_TYPE_CLAIM': 'token_type',
 }
 
-# Django Async Manager Configuration
+# Django Async Manager Configuration - 优化为高并发SQLite
 ASYNC_MANAGER = {
-    'MAX_WORKERS': 4,  # 最大工作进程数
-    'QUEUE_TIMEOUT': 300,  # 队列超时时间（秒）
-    'TASK_TIMEOUT': 600,  # 任务超时时间（秒）
-    'MAX_RETRIES': 3,  # 最大重试次数
-    'RETRY_DELAY': 60,  # 重试延迟（秒）
+    'MAX_WORKERS': 6,  # 增加到6个工作线程，充分利用WAL并发能力
+    'QUEUE_TIMEOUT': 120,  # 减少队列超时，提高响应速度
+    'TASK_TIMEOUT': 300,  # 5分钟任务超时
+    'MAX_RETRIES': 3,  # 增加重试次数，配合自动重试机制
+    'RETRY_DELAY': 5,  # 减少重试延迟，毫秒级重试由数据库层处理
     'ENABLE_SCHEDULER': True,  # 启用定时任务调度器
+    'BATCH_SIZE': 10,  # 批处理大小
+    'PRESERVE_FRESHNESS': 30.0,  # 连接新鲜度30秒
 }
 
 # Logging Configuration
@@ -206,7 +218,11 @@ LOGGING = {
     'disable_existing_loggers': False,
     'formatters': {
         'verbose': {
-            'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
+            'format': '{levelname} {asctime} {module}:{lineno} {threadName} {message}',
+            'style': '{',
+        },
+        'detailed': {
+            'format': '{levelname} {asctime} {name}:{funcName}:{lineno} [{process}:{thread}] {message}',
             'style': '{',
         },
         'simple': {
@@ -217,7 +233,7 @@ LOGGING = {
     'handlers': {
         'console': {
             'class': 'logging.StreamHandler',
-            'formatter': 'verbose',
+            'formatter': 'detailed',
         },
     },
     'root': {
@@ -227,13 +243,24 @@ LOGGING = {
     'loggers': {
         'llms': {
             'handlers': ['console'],
-            'level': 'DEBUG',
+            'level': 'INFO',  # 降低到INFO级别减少日志量
             'propagate': False,
         },
         'django_async_manager': {
             'handlers': ['console'],
-            'level': 'DEBUG',
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'utils.db_utils': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'utils.middleware': {
+            'handlers': ['console'],
+            'level': 'INFO',
             'propagate': False,
         },
     },
 }
+

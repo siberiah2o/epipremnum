@@ -17,25 +17,21 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { MediaList, MediaEdit, MediaPreviewDialog } from "@/components/media"
 import { MediaListItem } from "@/lib/api"
 import { useMediaList } from '@/hooks/use-media'
-import { FileImage, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 
 export default function MediaPage() {
   useRouteGuard() // 添加路由保护
   const [editingMedia, setEditingMedia] = useState<MediaListItem | null>(null)
   const [viewingMedia, setViewingMedia] = useState<MediaListItem | null>(null)
-  const [activeTab, setActiveTab] = useState('list')
 
   // 获取媒体列表数据用于预览切换
   const { mediaList, isLoading } = useMediaList()
 
   const handleEdit = (media: MediaListItem) => {
     setEditingMedia(media)
-    setActiveTab('edit')
   }
 
   const handleView = (media: MediaListItem) => {
@@ -52,13 +48,11 @@ export default function MediaPage() {
 
   const handleEditSuccess = () => {
     setEditingMedia(null)
-    setActiveTab('list')
     toast.success('媒体文件更新成功')
   }
 
   const handleEditClose = () => {
     setEditingMedia(null)
-    setActiveTab('list')
   }
 
   return (
@@ -92,35 +86,18 @@ export default function MediaPage() {
           </Breadcrumb>
         </header>
         <div className="flex flex-1 flex-col gap-4 p-4">
-  
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-            <TabsList>
-              <TabsTrigger value="list" className="flex items-center gap-2">
-                <FileImage className="h-4 w-4" />
-                文件列表
-              </TabsTrigger>
-              <TabsTrigger value="edit" disabled={!editingMedia} className="flex items-center gap-2">
-                编辑文件
-              </TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="list" className="space-y-4">
-              <MediaList
-                onEdit={handleEdit}
-                onView={handleView}
-              />
-            </TabsContent>
-
-            <TabsContent value="edit" className="space-y-4">
-              {editingMedia && (
-                <MediaEdit
-                  mediaId={editingMedia.id}
-                  onClose={handleEditClose}
-                  onSuccess={handleEditSuccess}
-                />
-              )}
-            </TabsContent>
-          </Tabs>
+          {editingMedia ? (
+            <MediaEdit
+              mediaId={editingMedia.id}
+              onClose={handleEditClose}
+              onSuccess={handleEditSuccess}
+            />
+          ) : (
+            <MediaList
+              onEdit={handleEdit}
+              onView={handleView}
+            />
+          )}
 
         {/* 预览对话框 */}
         <MediaPreviewDialog

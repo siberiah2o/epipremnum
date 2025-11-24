@@ -1,0 +1,472 @@
+{
+  "info": {
+    "title": "epipremnum - 模型管理 API",
+    "description": "AI模型管理接口文档，支持模型列表获取、刷新、设置默认模型等功能",
+    "version": "2.0.0"
+  },
+  "openapi": "3.0.0",
+  "servers": [
+    {
+      "url": "http://192.168.55.133:8888",
+      "description": "生产环境"
+    }
+  ],
+  "paths": {
+    "/api/ollama/models/": {
+      "get": {
+        "summary": "获取模型列表",
+        "description": "获取可用的AI模型列表，包含模型信息和端点配置",
+        "tags": ["模型管理 API"],
+        "parameters": [
+          {
+            "name": "Authorization",
+            "in": "header",
+            "description": "Bearer token 认证",
+            "required": true,
+            "example": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+            "schema": {"type": "string"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功获取模型列表",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 200,
+                  "message": "获取模型列表成功",
+                  "data": [
+                    {
+                      "id": 1,
+                      "name": "qwen3-vl:2b-instruct-bf16",
+                      "display_name": "Qwen3-Vl 2B Instruct",
+                      "description": "视觉模型 - 参数规模: 2B",
+                      "endpoint": 1,
+                      "endpoint_name": "默认Ollama端点",
+                      "endpoint_url": "http://115.190.140.100:31434",
+                      "is_active": true,
+                      "is_vision_capable": true,
+                      "is_default": true,
+                      "model_size": "2GB",
+                      "created_at": "2025-01-20T10:00:00Z",
+                      "updated_at": "2025-01-20T10:00:00Z"
+                    },
+                    {
+                      "id": 2,
+                      "name": "llava:7b",
+                      "display_name": "LLaVA 7B",
+                      "description": "视觉模型 - 参数规模: 7B",
+                      "endpoint": 1,
+                      "endpoint_name": "默认Ollama端点",
+                      "endpoint_url": "http://115.190.140.100:31434",
+                      "is_active": true,
+                      "is_vision_capable": true,
+                      "is_default": false,
+                      "model_size": "7GB",
+                      "created_at": "2025-01-20T10:00:00Z",
+                      "updated_at": "2025-01-20T10:00:00Z"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未授权访问",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401,
+                  "message": "认证失败",
+                  "data": null
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ollama/models/refresh/": {
+      "post": {
+        "summary": "刷新模型列表",
+        "description": "从Ollama端点重新获取模型列表，自动发现和同步视觉模型",
+        "tags": ["模型管理 API"],
+        "parameters": [
+          {
+            "name": "Authorization",
+            "in": "header",
+            "description": "Bearer token 认证",
+            "required": true,
+            "example": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+            "schema": {"type": "string"}
+          },
+          {
+            "name": "Content-Type",
+            "in": "header",
+            "description": "请求内容类型",
+            "required": true,
+            "example": "application/json",
+            "schema": {"type": "string"}
+          }
+        ],
+        "requestBody": {
+          "description": "刷新参数（可选）",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "endpoint_id": {
+                    "type": "integer",
+                    "description": "指定刷新的端点ID（可选，不指定则刷新所有活跃端点）",
+                    "example": 1
+                  }
+                }
+              },
+              "example": {}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功刷新模型列表",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 200,
+                  "message": "模型刷新完成",
+                  "data": {
+                    "message": "模型刷新完成",
+                    "synced": 5,
+                    "endpoints": [
+                      {
+                        "endpoint_id": 1,
+                        "endpoint_name": "默认Ollama端点",
+                        "models_count": 3,
+                        "synced_count": 2
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "端点不存在",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404,
+                  "message": "端点 ID 999 不存在",
+                  "data": null
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "刷新失败",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500,
+                  "message": "没有找到可用的端点，且创建默认端点失败",
+                  "data": null
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ollama/models/{id}/": {
+      "get": {
+        "summary": "获取模型详情",
+        "description": "获取指定模型的详细信息",
+        "tags": ["模型管理 API"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "模型ID",
+            "schema": {"type": "integer"},
+            "example": 1
+          },
+          {
+            "name": "Authorization",
+            "in": "header",
+            "description": "Bearer token 认证",
+            "required": true,
+            "example": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+            "schema": {"type": "string"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功获取模型详情",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 200,
+                  "message": "获取模型详情成功",
+                  "data": {
+                    "id": 1,
+                    "name": "qwen3-vl:2b-instruct-bf16",
+                    "display_name": "Qwen3-Vl 2B Instruct",
+                    "description": "视觉模型 - 参数规模: 2B",
+                    "endpoint": 1,
+                    "endpoint_name": "默认Ollama端点",
+                    "endpoint_url": "http://115.190.140.100:31434",
+                    "is_active": true,
+                    "is_vision_capable": true,
+                    "is_default": true,
+                    "model_size": "2GB",
+                    "created_at": "2025-01-20T10:00:00Z",
+                    "updated_at": "2025-01-20T10:00:00Z"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "模型不存在",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404,
+                  "message": "AI模型不存在",
+                  "data": null
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ollama/models/{id}/test/": {
+      "get": {
+        "summary": "测试模型连接",
+        "description": "测试指定模型的连接状态和可用性",
+        "tags": ["模型管理 API"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "模型ID",
+            "schema": {"type": "integer"},
+            "example": 1
+          },
+          {
+            "name": "Authorization",
+            "in": "header",
+            "description": "Bearer token 认证",
+            "required": true,
+            "example": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+            "schema": {"type": "string"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功测试模型连接",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 200,
+                  "message": "模型连接测试成功",
+                  "data": {
+                    "model_name": "qwen3-vl:2b-instruct-bf16",
+                    "endpoint_url": "http://115.190.140.100:31434",
+                    "status": "available",
+                    "response_time": 1.23,
+                    "test_time": "2025-01-20T10:30:00Z"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "模型不存在或不可用",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404,
+                  "message": "AI模型不存在或连接失败",
+                  "data": null
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ollama/models/{id}/default/": {
+      "post": {
+        "summary": "设置默认模型",
+        "description": "将指定模型设置为默认视觉模型",
+        "tags": ["模型管理 API"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "模型ID",
+            "schema": {"type": "integer"},
+            "example": 1
+          },
+          {
+            "name": "Authorization",
+            "in": "header",
+            "description": "Bearer token 认证",
+            "required": true,
+            "example": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+            "schema": {"type": "string"}
+          },
+          {
+            "name": "Content-Type",
+            "in": "header",
+            "description": "请求内容类型",
+            "required": true,
+            "example": "application/json",
+            "schema": {"type": "string"}
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              },
+              "example": {}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功设置默认模型",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 200,
+                  "message": "默认模型设置成功",
+                  "data": {
+                    "model_id": 1,
+                    "model_name": "qwen3-vl:2b-instruct-bf16",
+                    "is_default": true
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "模型不存在",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404,
+                  "message": "AI模型不存在",
+                  "data": null
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ollama/models/set-default/": {
+      "post": {
+        "summary": "按名称设置默认模型",
+        "description": "根据模型名称设置默认视觉模型",
+        "tags": ["模型管理 API"],
+        "parameters": [
+          {
+            "name": "Authorization",
+            "in": "header",
+            "description": "Bearer token 认证",
+            "required": true,
+            "example": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+            "schema": {"type": "string"}
+          },
+          {
+            "name": "Content-Type",
+            "in": "header",
+            "description": "请求内容类型",
+            "required": true,
+            "example": "application/json",
+            "schema": {"type": "string"}
+          }
+        ],
+        "requestBody": {
+          "description": "按名称设置默认模型",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["model_name"],
+                "properties": {
+                  "model_name": {
+                    "type": "string",
+                    "description": "模型名称",
+                    "example": "qwen3-vl:2b-instruct-bf16"
+                  }
+                }
+              },
+              "example": {
+                "model_name": "qwen3-vl:2b-instruct-bf16"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功设置默认模型",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 200,
+                  "message": "默认模型设置成功",
+                  "data": {
+                    "model_id": 1,
+                    "model_name": "qwen3-vl:2b-instruct-bf16",
+                    "is_default": true
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "模型名称不能为空",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400,
+                  "message": "模型名称不能为空",
+                  "data": null
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "模型不存在",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404,
+                  "message": "指定的模型不存在",
+                  "data": null
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "模型管理 API",
+      "description": "AI模型管理相关接口，包括模型列表、刷新、测试和默认模型设置等功能"
+    }
+  ]
+}

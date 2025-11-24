@@ -105,6 +105,15 @@ export interface MediaListItem {
   }> | null;
   ai_prompt?: string | null;
   ai_analyzed_at?: string | null;
+  // 添加完整的分类和标签字段
+  categories?: Array<{
+    id: number;
+    name: string;
+  }> | null;
+  tags?: Array<{
+    id: number;
+    name: string;
+  }> | null;
 }
 
 export interface PaginatedMediaList {

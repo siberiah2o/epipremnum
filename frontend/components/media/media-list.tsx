@@ -57,15 +57,9 @@ import {
   ChevronRight,
   LayoutGrid,
   List,
-  Brain,
-  Keyboard,
-  ArrowUp,
-  ArrowDown,
-  ArrowLeft,
-  ArrowRight,
-  Tag,
+    Tag,
 } from "lucide-react";
-import { MediaListItem, apiClient } from "@/lib/api";
+import { MediaListItem, MediaFile, apiClient } from "@/lib/api";
 import { formatDistanceToNow } from "date-fns";
 
 // 紧凑的标签展示组件（用于表格）
@@ -74,13 +68,14 @@ const CompactTagsDisplay = React.memo(
     items,
     variant = "secondary",
     icon: Icon,
+    onViewMore,
   }: {
     items: Array<{ name: string; id: number }>;
     variant?: "secondary" | "outline";
     icon?: any;
+    onViewMore?: () => void;
   }) => {
-    const [isExpanded, setIsExpanded] = useState(false);
-    const displayItems = isExpanded ? items : items.slice(0, 3);
+    const displayItems = items.slice(0, 3);
     const hasMore = items.length > 3;
 
     return (
@@ -95,22 +90,13 @@ const CompactTagsDisplay = React.memo(
             {item.name}
           </Badge>
         ))}
-        {hasMore && !isExpanded && (
+        {hasMore && onViewMore && (
           <Badge
             variant="outline"
             className="text-xs px-2 py-1 cursor-pointer hover:bg-muted/50 transition-colors"
-            onClick={() => setIsExpanded(true)}
+            onClick={onViewMore}
           >
             +{items.length - 3} 更多
-          </Badge>
-        )}
-        {hasMore && isExpanded && (
-          <Badge
-            variant="outline"
-            className="text-xs px-2 py-1 cursor-pointer hover:bg-muted/50 transition-colors"
-            onClick={() => setIsExpanded(false)}
-          >
-            收起
           </Badge>
         )}
       </div>
@@ -136,6 +122,8 @@ export function MediaList({ onEdit, onView }: MediaListProps) {
   const [fallbackToOriginal, setFallbackToOriginal] = useState<Set<number>>(
     new Set()
   );
+  const [imageRetryCount, setImageRetryCount] = useState<Map<number, number>>(new Map());
+  const MAX_RETRY_ATTEMPTS = 3;
   const [viewMode, setViewMode] = useState<"list" | "grid">("list");
   const [pageSize, setPageSize] = useState(12);
 
@@ -154,6 +142,28 @@ export function MediaList({ onEdit, onView }: MediaListProps) {
   const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
   const [isKeyboardNavEnabled, setIsKeyboardNavEnabled] = useState(false);
 
+  // 媒体详情缓存 (用于获取完整的categories和tags)
+  const [mediaDetailsMap, setMediaDetailsMap] = useState<Map<number, MediaFile>>(new Map());
+
+  // 获取媒体详情的函数
+  const fetchMediaDetails = async (mediaId: number) => {
+    if (mediaDetailsMap.has(mediaId)) {
+      return mediaDetailsMap.get(mediaId)!;
+    }
+
+    try {
+      const response = await apiClient.getMedia(mediaId);
+      if (response.data) {
+        setMediaDetailsMap(prev => new Map(prev.set(mediaId, response.data)));
+        return response.data;
+      }
+    } catch (error) {
+      console.error(`Failed to fetch media details for ID ${mediaId}:`, error);
+    }
+    return null;
+  };
+
+  
   // 每页显示行数选项
   const pageSizeOptions = [8, 12, 16, 20, 24, 30, 40, 50];
 
@@ -162,6 +172,50 @@ export function MediaList({ onEdit, onView }: MediaListProps) {
     pageSize,
     debouncedSearchQuery
   );
+
+  // 获取媒体的实际categories和tags
+  const getMediaCategories = (media: MediaListItem): any[] | null | undefined => {
+    const details = mediaDetailsMap.get(media.id);
+    if (details === undefined) {
+      return undefined; // 未加载
+    }
+    return details?.categories || null;
+  };
+
+  const getMediaTags = (media: MediaListItem): any[] | null | undefined => {
+    const details = mediaDetailsMap.get(media.id);
+    if (details === undefined) {
+      return undefined; // 未加载
+    }
+    return details?.tags || null;
+  };
+
+  // 预加载当前页所有媒体的详情
+  useEffect(() => {
+    if (mediaList?.results) {
+      mediaList.results.forEach(media => {
+        if (!mediaDetailsMap.has(media.id)) {
+          fetchMediaDetails(media.id);
+        }
+      });
+    }
+  }, [mediaList?.results]);
+
+  // 重置错误状态当媒体列表刷新时
+  useEffect(() => {
+    if (mediaList?.results?.length) {
+      // 清除已删除媒体的错误状态
+      setImageErrors((prev) => {
+        const newSet = new Set<number>();
+        prev.forEach((id) => {
+          if (mediaList.results.some((media) => media.id === id)) {
+            newSet.add(id);
+          }
+        });
+        return newSet;
+      });
+    }
+  }, [mediaList?.results]);
 
   // 键盘导航逻辑
   useEffect(() => {
@@ -249,6 +303,7 @@ export function MediaList({ onEdit, onView }: MediaListProps) {
           }
           break;
 
+  
         case "d":
           event.preventDefault();
           if (currentIndex >= 0 && currentIndex < itemCount) {
@@ -257,16 +312,7 @@ export function MediaList({ onEdit, onView }: MediaListProps) {
           }
           break;
 
-        case "a":
-          event.preventDefault();
-          if (currentIndex >= 0 && currentIndex < itemCount) {
-            const selectedMedia = mediaList.results[currentIndex];
-            if (selectedMedia.file_type === "image") {
-              handleAIAnalysis(selectedMedia);
-            }
-          }
-          break;
-
+  
         case "Escape":
           event.preventDefault();
           setFocusedIndex(null);
@@ -312,64 +358,7 @@ export function MediaList({ onEdit, onView }: MediaListProps) {
     setFocusedIndex(null); // 分页大小改变时重置焦点
   }, [pageSize]);
 
-  // 键盘快捷键提示组件
-  const KeyboardShortcutsHelp = () => (
-    <div className="text-xs text-muted-foreground space-y-1 p-3 bg-muted/50 rounded-lg">
-      <div className="flex items-center gap-2 mb-2">
-        <Keyboard className="h-3 w-3" />
-        <span className="font-medium">键盘快捷键</span>
-      </div>
-      <div className="grid grid-cols-2 gap-2 text-xs">
-        <div className="flex items-center gap-1">
-          <ArrowUp className="h-3 w-3" />
-          <span>上移</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <ArrowDown className="h-3 w-3" />
-          <span>下移</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <ArrowLeft className="h-3 w-3" />
-          <span>左移</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <ArrowRight className="h-3 w-3" />
-          <span>右移</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <kbd className="px-1 py-0.5 bg-background border rounded text-xs">
-            Enter
-          </kbd>
-          <span>查看</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <kbd className="px-1 py-0.5 bg-background border rounded text-xs">
-            E
-          </kbd>
-          <span>编辑</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <kbd className="px-1 py-0.5 bg-background border rounded text-xs">
-            D
-          </kbd>
-          <span>删除</span>
-        </div>
-        <div className="flex items-center gap-1">
-          <kbd className="px-1 py-0.5 bg-background border rounded text-xs">
-            A
-          </kbd>
-          <span>AI分析</span>
-        </div>
-        <div className="flex items-center gap-1 col-span-2">
-          <kbd className="px-1 py-0.5 bg-background border rounded text-xs">
-            ESC
-          </kbd>
-          <span>取消选择</span>
-        </div>
-      </div>
-    </div>
-  );
-
+  
   const handlePageChange = (page: number) => {
     setCurrentPage(page);
   };
@@ -477,35 +466,7 @@ export function MediaList({ onEdit, onView }: MediaListProps) {
     setMediaToDelete(null);
   };
 
-  const handleAIAnalysis = async (media: MediaListItem) => {
-    if (media.file_type !== "image") {
-      toast.error("只有图片文件支持AI分析");
-      return;
-    }
-
-    try {
-      // 使用完整分析功能
-      const response = await apiClient.generateCombined(media.id, {
-        generateTitle: true,
-        generateDescription: true,
-        generatePrompt: true,
-        generateCategories: true,
-        generateTags: true,
-        maxCategories: 5,
-        maxTags: 10,
-      });
-
-      if (response.data) {
-        toast.success("图片分析完成！");
-        // 刷新媒体列表
-        refetch();
-      }
-    } catch (error: any) {
-      console.error("AI分析失败:", error);
-      toast.error(error.message || "AI分析失败");
-    }
-  };
-
+  
   const getFileIcon = (fileType: string) => {
     return <FileIcon mimeType={fileType} size="sm" />;
   };
@@ -557,6 +518,9 @@ export function MediaList({ onEdit, onView }: MediaListProps) {
   };
 
   const handleImageError = (media: MediaListItem) => {
+    // 获取当前重试次数
+    const currentRetryCount = imageRetryCount.get(media.id) || 0;
+
     // 如果当前使用的是缩略图且是图片文件，尝试回退到原图
     if (
       media.file_type === "image" &&
@@ -564,25 +528,59 @@ export function MediaList({ onEdit, onView }: MediaListProps) {
       !fallbackToOriginal.has(media.id)
     ) {
       setFallbackToOriginal((prev) => new Set([...prev, media.id]));
+      // 清除错误状态，允许重试原图
+      setImageErrors((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(media.id);
+        return newSet;
+      });
+      // 增加重试计数
+      setImageRetryCount((prev) => new Map(prev.set(media.id, currentRetryCount + 1)));
+    } else if (currentRetryCount < MAX_RETRY_ATTEMPTS) {
+      // 重试原图
+      setFallbackToOriginal((prev) => new Set([...prev, media.id]));
+      setImageErrors((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(media.id);
+        return newSet;
+      });
+      setImageRetryCount((prev) => new Map(prev.set(media.id, currentRetryCount + 1)));
     } else {
-      // 如果已经尝试过原图或者不是图片文件，则标记为错误
+      // 已经超过最大重试次数，标记为错误
       setImageErrors((prev) => new Set([...prev, media.id]));
+      console.warn(`Failed to load image for media ${media.id} after ${MAX_RETRY_ATTEMPTS} attempts`);
     }
   };
 
   const getImageSrc = (media: MediaListItem) => {
-    // 如果图片加载失败过
+    // 如果图片加载失败过，返回null以显示fallback图标
     if (imageErrors.has(media.id)) {
       return null;
     }
 
+    let imageUrl = null;
+
     // 如果是图片且已经回退到原图
     if (media.file_type === "image" && fallbackToOriginal.has(media.id)) {
-      return media.file_url;
+      imageUrl = media.file_url;
+    } else {
+      // 优先使用缩略图，如果不存在则使用原图
+      imageUrl = media.thumbnail_url || media.file_url;
     }
 
-    // 优先使用缩略图，如果不存在则使用原图
-    return media.thumbnail_url || media.file_url;
+    // 调试信息：在开发环境下输出URL信息
+    if (process.env.NODE_ENV === 'development' && imageUrl) {
+      console.log(`Image URL for media ${media.id}:`, imageUrl);
+      console.log(`Thumbnail URL:`, media.thumbnail_url);
+      console.log(`File URL:`, media.file_url);
+    }
+
+    // 确保返回有效的URL
+    if (!imageUrl || imageUrl.trim() === '') {
+      return null;
+    }
+
+    return imageUrl;
   };
 
   const formatFileSize = (bytes: number) => {
@@ -608,13 +606,13 @@ export function MediaList({ onEdit, onView }: MediaListProps) {
                 : undefined
             }
             tabIndex={isKeyboardNavEnabled && focusedIndex === index ? 0 : -1}
-            className={`group relative bg-background border rounded-lg overflow-hidden hover:shadow-lg transition-all duration-200 ${
+            className={`group relative bg-gradient-to-br from-background to-muted/20 border rounded-xl overflow-hidden hover:shadow-xl transition-all duration-300 ${
               selectedIds.has(media.id)
-                ? "ring-2 ring-primary ring-offset-2"
-                : ""
+                ? "ring-2 ring-purple-400/30 ring-offset-2 shadow-purple-500/10 scale-[1.02] border-purple-200/50 dark:border-purple-800/30"
+                : "hover:border-gray-200 dark:hover:border-gray-700"
             } ${
-              isKeyboardNavEnabled && focusedIndex === index
-                ? "ring-2 ring-blue-500 ring-offset-2 shadow-lg scale-105"
+              isKeyboardNavEnabled && focusedIndex === index && !selectedIds.has(media.id)
+                ? "ring-2 ring-gray-400/30 ring-offset-2 shadow-gray-500/10 scale-[1.01]"
                 : ""
             }`}
             onClick={() => {
@@ -624,11 +622,16 @@ export function MediaList({ onEdit, onView }: MediaListProps) {
           >
             {/* 选择框 */}
             <div className="absolute top-2 left-2 z-10">
-              <Checkbox
-                checked={selectedIds.has(media.id)}
-                onCheckedChange={() => toggleSelection(media.id)}
-                className="bg-background/80 backdrop-blur-sm"
-              />
+              <div className="relative">
+                <Checkbox
+                  checked={selectedIds.has(media.id)}
+                  onCheckedChange={() => toggleSelection(media.id)}
+                  className="bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm border-gray-300 dark:border-gray-600 data-[state=checked]:bg-gradient-to-br data-[state=checked]:from-purple-500 data-[state=checked]:to-purple-600 data-[state=checked]:border-purple-500 data-[state=checked]:shadow-lg data-[state=checked]:shadow-purple-500/25 transition-all duration-200"
+                />
+                {selectedIds.has(media.id) && (
+                  <div className="absolute -inset-1 bg-purple-400/20 rounded-md animate-ping" />
+                )}
+              </div>
             </div>
 
             {/* 操作按钮 */}
@@ -637,43 +640,48 @@ export function MediaList({ onEdit, onView }: MediaListProps) {
                 <Button
                   variant="secondary"
                   size="sm"
-                  onClick={() => onView?.(media)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onView?.(media);
+                  }}
                   className="h-8 w-8 p-0 bg-background/80 backdrop-blur-sm"
+                  title="预览"
                 >
                   <Eye className="h-4 w-4" />
                 </Button>
                 <Button
                   variant="secondary"
                   size="sm"
-                  onClick={() => onEdit?.(media)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onEdit?.(media);
+                  }}
                   className="h-8 w-8 p-0 bg-background/80 backdrop-blur-sm"
+                  title="编辑"
                 >
                   <Edit className="h-4 w-4" />
                 </Button>
                 <Button
                   variant="secondary"
                   size="sm"
-                  onClick={() => handleDownload(media)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDownload(media);
+                  }}
                   className="h-8 w-8 p-0 bg-background/80 backdrop-blur-sm"
+                  title="下载"
                 >
                   <Download className="h-4 w-4" />
                 </Button>
-                {media.file_type === "image" && (
                   <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => handleAIAnalysis(media)}
-                    className="h-8 w-8 p-0 bg-background/80 backdrop-blur-sm"
-                    title="AI分析"
-                  >
-                    <Brain className="h-4 w-4" />
-                  </Button>
-                )}
-                <Button
                   variant="destructive"
                   size="sm"
-                  onClick={() => handleDeleteClick(media)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDeleteClick(media);
+                  }}
                   className="h-8 w-8 p-0 bg-background/80 backdrop-blur-sm"
+                  title="删除"
                 >
                   <Trash2 className="h-4 w-4" />
                 </Button>
@@ -682,7 +690,7 @@ export function MediaList({ onEdit, onView }: MediaListProps) {
 
             {/* 媒体预览区域 */}
             <div
-              className="aspect-square bg-muted/50 relative overflow-hidden cursor-pointer"
+              className="aspect-square bg-gradient-to-br from-gray-50/50 to-gray-100/50 dark:from-gray-900/50 dark:to-gray-800/50 relative overflow-hidden cursor-pointer group/image"
               onClick={() => onView?.(media)}
             >
               {(media.file_type === "image" || media.file_type === "video") &&
@@ -699,31 +707,55 @@ export function MediaList({ onEdit, onView }: MediaListProps) {
                 ) : (
                   <>
                     {media.file_type === "image" ? (
-                      <img
-                        src={getImageSrc(media) || undefined}
-                        alt={media.title}
-                        className="w-full h-full object-cover transition-transform group-hover:scale-105"
-                        onError={() => handleImageError(media)}
-                        loading="lazy"
-                      />
+                      <div className="w-full h-full flex items-center justify-center bg-muted/20">
+                        {getImageSrc(media) ? (
+                          <div className="relative w-full h-full flex items-center justify-center">
+                            <img
+                              src={getImageSrc(media)!}
+                              alt={media.title}
+                              className="max-w-full max-h-full object-contain transition-all duration-300 group-hover/image:scale-105 group-hover/image:shadow-2xl"
+                              onError={() => handleImageError(media)}
+                              loading="lazy"
+                            />
+                            {/* 选中状态的光泽效果 */}
+                            {selectedIds.has(media.id) && (
+                              <div className="absolute inset-0 bg-gradient-to-tr from-purple-500/10 via-transparent to-transparent pointer-events-none rounded-lg" />
+                            )}
+                          </div>
+                        ) : (
+                          <FileIcon mimeType="image/jpeg" size="lg" />
+                        )}
+                      </div>
                     ) : (
-                      <div className="relative w-full h-full">
-                        <img
-                          src={getImageSrc(media) || undefined}
-                          alt={media.title}
-                          className="w-full h-full object-cover"
-                          onError={() => handleImageError(media)}
-                          loading="lazy"
-                        />
-                        <div className="absolute inset-0 flex items-center justify-center">
+                      <div className="relative w-full h-full flex items-center justify-center">
+                        {getImageSrc(media) ? (
+                          <>
+                            <img
+                              src={getImageSrc(media)!}
+                              alt={media.title}
+                              className="max-w-full max-h-full object-contain"
+                              onError={() => handleImageError(media)}
+                              loading="lazy"
+                            />
+                            <div className="absolute inset-0 flex items-center justify-center">
+                              <div className="bg-black/50 rounded-full p-2">
+                                <FileIcon
+                                  mimeType="video/mp4"
+                                  size="sm"
+                                  className="text-white"
+                                />
+                              </div>
+                            </div>
+                          </>
+                        ) : (
                           <div className="bg-black/50 rounded-full p-2">
                             <FileIcon
                               mimeType="video/mp4"
-                              size="sm"
+                              size="lg"
                               className="text-white"
                             />
                           </div>
-                        </div>
+                        )}
                       </div>
                     )}
                   </>
@@ -747,14 +779,20 @@ export function MediaList({ onEdit, onView }: MediaListProps) {
               <div className="mb-2">
                 <h4
                   className="font-medium text-sm truncate cursor-pointer hover:text-primary transition-colors"
-                  onClick={() => onView?.(media)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onView?.(media);
+                  }}
                   title={media.title}
                 >
                   {media.title}
                 </h4>
                 {(media.ai_description || media.description) && (
                   <p
-                    onClick={() => onView?.(media)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onView?.(media);
+                    }}
                     className="text-sm text-muted-foreground line-clamp-2 cursor-pointer hover:text-foreground transition-colors"
                     title={
                       media.ai_description || media.description || undefined
@@ -882,7 +920,7 @@ export function MediaList({ onEdit, onView }: MediaListProps) {
                           !focusedIndex && setIsKeyboardNavEnabled(false)
                         }
                       >
-                        <Keyboard className="h-3 w-3" />
+                        <Search className="h-3 w-3" />
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent side="bottom" className="max-w-md">
@@ -913,12 +951,12 @@ export function MediaList({ onEdit, onView }: MediaListProps) {
                             </kbd>{" "}
                             编辑
                           </div>
-                          <div>
+                            <div>
                             •{" "}
                             <kbd className="px-1 py-0.5 bg-background border rounded">
-                              A
+                              D
                             </kbd>{" "}
-                            AI分析
+                            删除
                           </div>
                           <div>
                             •{" "}
@@ -995,8 +1033,8 @@ export function MediaList({ onEdit, onView }: MediaListProps) {
                         </TableHead>
                         <TableHead>文件</TableHead>
                         <TableHead>类型</TableHead>
-                        <TableHead>AI分类</TableHead>
-                        <TableHead>AI标签</TableHead>
+                        <TableHead>分类</TableHead>
+                        <TableHead>标签</TableHead>
                         <TableHead>大小</TableHead>
                         <TableHead>创建时间</TableHead>
                         <TableHead className="text-right">操作</TableHead>
@@ -1017,13 +1055,16 @@ export function MediaList({ onEdit, onView }: MediaListProps) {
                               : -1
                           }
                           className={`
-                        ${selectedIds.has(media.id) ? "bg-muted/50" : ""}
+                        ${selectedIds.has(media.id)
+                          ? "bg-gradient-to-r from-purple-50/50 to-transparent dark:from-purple-950/20 border-l-4 border-l-purple-400"
+                          : ""
+                        }
                         ${
-                          isKeyboardNavEnabled && focusedIndex === index
-                            ? "ring-2 ring-blue-500 ring-offset-2"
+                          isKeyboardNavEnabled && focusedIndex === index && !selectedIds.has(media.id)
+                            ? "ring-2 ring-gray-400/30 ring-offset-2 bg-gray-50/30 dark:bg-gray-950/20"
                             : ""
                         }
-                        cursor-pointer hover:bg-muted/30 transition-colors
+                        cursor-pointer hover:bg-muted/20 transition-all duration-200
                       `}
                           onClick={() => {
                             setFocusedIndex(index);
@@ -1042,7 +1083,21 @@ export function MediaList({ onEdit, onView }: MediaListProps) {
                               {(media.file_type === "image" ||
                                 media.file_type === "video") &&
                               (media.thumbnail_url || media.file_url) ? (
-                                imageErrors.has(media.id) ? (
+                                getImageSrc(media) ? (
+                                  <img
+                                    src={getImageSrc(media)!}
+                                    alt={media.title}
+                                    className="h-10 w-10 rounded object-contain cursor-pointer hover:opacity-80 transition-opacity"
+                                    onError={() => handleImageError(media)}
+                                    onClick={() => onView?.(media)}
+                                    loading="lazy"
+                                    title={
+                                      media.file_type === "image"
+                                        ? "点击查看图片"
+                                        : "点击查看视频"
+                                    }
+                                  />
+                                ) : (
                                   <div
                                     className="h-10 w-10 rounded bg-muted flex items-center justify-center cursor-pointer hover:bg-muted/80 transition-colors"
                                     onClick={() => onView?.(media)}
@@ -1057,20 +1112,6 @@ export function MediaList({ onEdit, onView }: MediaListProps) {
                                       size="sm"
                                     />
                                   </div>
-                                ) : (
-                                  <img
-                                    src={getImageSrc(media) || undefined}
-                                    alt={media.title}
-                                    className="h-10 w-10 rounded object-cover cursor-pointer hover:opacity-80 transition-opacity"
-                                    onError={() => handleImageError(media)}
-                                    onClick={() => onView?.(media)}
-                                    loading="lazy"
-                                    title={
-                                      media.file_type === "image"
-                                        ? "点击查看图片"
-                                        : "点击查看视频"
-                                    }
-                                  />
                                 )
                               ) : (
                                 <div
@@ -1095,7 +1136,10 @@ export function MediaList({ onEdit, onView }: MediaListProps) {
                               <div>
                                 <p
                                   className="font-medium cursor-pointer hover:text-primary transition-colors"
-                                  onClick={() => onView?.(media)}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onView?.(media);
+                                  }}
                                 >
                                   {media.title}
                                 </p>
@@ -1120,28 +1164,42 @@ export function MediaList({ onEdit, onView }: MediaListProps) {
                           </TableCell>
                           <TableCell>
                             <div className="max-w-xs">
-                              {media.ai_categories && media.ai_categories.length > 0 ? (
-                                <CompactTagsDisplay
-                                  items={media.ai_categories}
-                                  variant="secondary"
-                                  icon={Brain}
-                                />
-                              ) : (
-                                <span className="text-muted-foreground text-xs">-</span>
-                              )}
+                              {(() => {
+                                const categories = getMediaCategories(media);
+                                if (categories === undefined) {
+                                  return <div className="animate-pulse bg-muted rounded h-4 w-12"></div>;
+                                }
+                                return categories && categories.length > 0 ? (
+                                  <CompactTagsDisplay
+                                    items={categories}
+                                    variant="secondary"
+                                    icon={Tag}
+                                    onViewMore={() => onView?.(media)}
+                                  />
+                                ) : (
+                                  <span className="text-muted-foreground text-xs">-</span>
+                                );
+                              })()}
                             </div>
                           </TableCell>
                           <TableCell>
                             <div className="max-w-xs">
-                              {media.ai_tags && media.ai_tags.length > 0 ? (
-                                <CompactTagsDisplay
-                                  items={media.ai_tags}
-                                  variant="outline"
-                                  icon={Tag}
-                                />
-                              ) : (
-                                <span className="text-muted-foreground text-xs">-</span>
-                              )}
+                              {(() => {
+                                const tags = getMediaTags(media);
+                                if (tags === undefined) {
+                                  return <div className="animate-pulse bg-muted rounded h-4 w-12"></div>;
+                                }
+                                return tags && tags.length > 0 ? (
+                                  <CompactTagsDisplay
+                                    items={tags}
+                                    variant="outline"
+                                    icon={Tag}
+                                    onViewMore={() => onView?.(media)}
+                                  />
+                                ) : (
+                                  <span className="text-muted-foreground text-xs">-</span>
+                                );
+                              })()}
                             </div>
                           </TableCell>
                           <TableCell>
@@ -1164,7 +1222,11 @@ export function MediaList({ onEdit, onView }: MediaListProps) {
                               <Button
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => onView?.(media)}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onView?.(media);
+                                }}
+                                title="预览"
                               >
                                 <Eye className="h-4 w-4" />
                               </Button>
@@ -1172,7 +1234,11 @@ export function MediaList({ onEdit, onView }: MediaListProps) {
                               <Button
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => onEdit?.(media)}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onEdit?.(media);
+                                }}
+                                title="编辑"
                               >
                                 <Edit className="h-4 w-4" />
                               </Button>
@@ -1180,27 +1246,25 @@ export function MediaList({ onEdit, onView }: MediaListProps) {
                               <Button
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => handleDownload(media)}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDownload(media);
+                                }}
+                                title="下载"
                               >
                                 <Download className="h-4 w-4" />
                               </Button>
 
-                              {media.file_type === "image" && (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => handleAIAnalysis(media)}
-                                  title="AI分析"
-                                >
-                                  <Brain className="h-4 w-4" />
-                                </Button>
-                              )}
-
+  
                               <Button
                                 variant="ghost"
                                 size="sm"
                                 className="text-destructive hover:text-destructive"
-                                onClick={() => handleDeleteClick(media)}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteClick(media);
+                                }}
+                                title="删除"
                               >
                                 <Trash2 className="h-4 w-4" />
                               </Button>
@@ -1214,12 +1278,7 @@ export function MediaList({ onEdit, onView }: MediaListProps) {
               )}
 
               {/* 键盘导航提示 */}
-              {isKeyboardNavEnabled && (
-                <div className="mt-4 flex justify-center">
-                  <KeyboardShortcutsHelp />
-                </div>
-              )}
-
+  
               {/* 分页 */}
               {totalPages > 1 && (
                 <div className="flex items-center justify-between mt-4">
@@ -1378,21 +1437,24 @@ export function MediaList({ onEdit, onView }: MediaListProps) {
 
       {/* 浮动批量操作栏 */}
       {selectedIds.size > 0 && (
-        <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-background border rounded-lg shadow-lg p-4 z-50 animate-in slide-in-from-bottom-5 duration-300">
+        <div className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-gradient-to-r from-background to-muted/20 backdrop-blur-xl border border-purple-200/30 dark:border-purple-800/30 rounded-2xl shadow-2xl shadow-purple-500/10 p-4 z-50 animate-in slide-in-from-bottom-5 duration-300">
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
-              <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-              <span className="text-sm font-medium">
+              <div className="relative">
+                <div className="w-3 h-3 bg-gradient-to-br from-purple-500 to-purple-600 rounded-full animate-pulse"></div>
+                <div className="absolute inset-0 w-3 h-3 bg-purple-400/30 rounded-full animate-ping"></div>
+              </div>
+              <span className="text-sm font-medium bg-gradient-to-r from-purple-600 to-purple-700 bg-clip-text text-transparent">
                 已选择 {selectedIds.size} 个文件
               </span>
             </div>
-            <div className="h-4 w-px bg-border"></div>
+            <div className="h-4 w-px bg-gradient-to-b from-transparent via-border to-transparent"></div>
             <Button
               variant="destructive"
               size="sm"
               onClick={() => setBatchDeleteDialogOpen(true)}
               disabled={isProcessingBatch}
-              className="h-8"
+              className="h-8 bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 border-0 shadow-lg shadow-red-500/25 transition-all duration-200"
             >
               <Trash2 className="h-4 w-4 mr-2" />
               删除
@@ -1402,7 +1464,7 @@ export function MediaList({ onEdit, onView }: MediaListProps) {
               size="sm"
               onClick={clearSelection}
               disabled={isProcessingBatch}
-              className="h-8"
+              className="h-8 bg-background/50 backdrop-blur-sm hover:bg-muted/50 border-purple-200/50 dark:border-purple-800/50 transition-all duration-200"
             >
               取消选择
             </Button>

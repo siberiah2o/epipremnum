@@ -3,6 +3,7 @@ from rest_framework.views import exception_handler
 from rest_framework.response import Response
 from rest_framework import status
 from django.http import Http404
+from django.db import IntegrityError
 from rest_framework.exceptions import (
     APIException,
     AuthenticationFailed,
@@ -223,6 +224,24 @@ def custom_exception_handler(exc, context):
 
         response.data = custom_response_data
 
+    # 处理数据库IntegrityError
+    elif isinstance(exc, IntegrityError):
+        custom_response_data = {
+            'code': status.HTTP_400_BAD_REQUEST,
+            'message': get_error_message(exc),
+            'data': None
+        }
+
+        # 记录警告级别的日志（客户端错误）
+        logger.warning(
+            f"Database Integrity Error: {log_data['exception_type']} - {log_data['exception_message']} "
+            f"in {log_data['view_name']} for {log_data['request_method']} {log_data['request_path']} "
+            f"by user {log_data['user_id']}",
+            extra=log_data
+        )
+
+        response = Response(custom_response_data, status=status.HTTP_400_BAD_REQUEST)
+
     # 处理其他未捕获的异常
     else:
         custom_response_data = {
@@ -260,6 +279,13 @@ def get_error_message(exc):
         return ErrorMessages.NOT_FOUND
     elif isinstance(exc, ValidationError):
         return ErrorMessages.VALIDATION_FAILED
+    elif isinstance(exc, IntegrityError):
+        # 处理数据库唯一约束错误
+        if 'UNIQUE constraint failed' in str(exc):
+            if 'ollama_ollamaendpoint' in str(exc):
+                return '该端点URL已经存在，请使用其他URL'
+            return '数据已存在，违反唯一性约束'
+        return '数据完整性错误'
     elif isinstance(exc, APIException):
         return exc.default_detail or ErrorMessages.REQUEST_FAILED
     else:
