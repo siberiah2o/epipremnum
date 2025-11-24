@@ -87,12 +87,6 @@ class OllamaImageAnalysisCreateSerializer(serializers.Serializer):
         default=dict,
         help_text="分析选项配置，包括生成标题、描述、提示词、分类、标签等"
     )
-    prompt = serializers.CharField(
-        required=False,
-        allow_null=True,
-        allow_blank=True,
-        help_text="自定义分析提示词"
-    )
 
     def validate_media_id(self, value):
         """验证媒体文件ID"""

@@ -58,7 +58,6 @@ INSTALLED_APPS = [
     'corsheaders',
     'users',
     'media',
-    'llms',
     'ollama',  # 添加 ollama 应用
     'django_async_manager',
     'utils',  # 添加工具包应用
