@@ -8,6 +8,7 @@ abstracted handlers internally.
 
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
+from rest_framework.response import Response
 from ..models import OllamaEndpoint, OllamaAIModel
 from ..serializers import (
     OllamaEndpointSerializer,
@@ -21,6 +22,7 @@ from .model import ModelCRUDHandler, ModelManagementHandler
 from .connection import ConnectionTestHandler
 from .sync import ModelSyncHandler
 from .analysis import AnalysisTaskHandler, AnalysisBatchHandler
+from .batch_status import BatchStatusHandler
 
 
 class OllamaEndpointViewSet(BaseViewSetMixin, viewsets.ModelViewSet):
@@ -229,3 +231,73 @@ class OllamaAnalysisViewSet(BaseViewSetMixin, viewsets.GenericViewSet):
         """批量取消任务"""
         handler = AnalysisBatchHandler(self)
         return handler.batch_cancel_tasks()
+
+    @action(detail=False, methods=['post'])
+    def cancel_all_tasks(self, request):
+        """取消所有任务"""
+        handler = AnalysisBatchHandler(self)
+        return handler.cancel_all_tasks()
+
+    @action(detail=False, methods=['post'])
+    def batch_status(self, request):
+        """批量获取任务状态"""
+        handler = BatchStatusHandler(self)
+        return handler.batch_get_status()
+
+    @action(detail=False, methods=['get'])
+    def batch_concurrency_info(self, request):
+        """获取批量并发状态信息"""
+        from ..tasks.concurrency_controller import image_batch_concurrency_controller
+
+        # 获取图片级并发状态（用于批量分析）
+        image_active_info = image_batch_concurrency_controller.get_active_images_info()
+
+        user_image_info = None
+
+        if hasattr(request, 'user') and request.user.is_authenticated:
+            user_id = str(request.user.id)
+
+            # 获取用户的图片并发信息
+            if user_id in image_active_info['users']:
+                image_info = image_active_info['users'][user_id]
+                user_image_info = {
+                    'user_id': request.user.id,
+                    'max_concurrent': image_info['max_concurrent'],
+                    'active_count': image_info['active_count'],
+                    'total_images': image_info['total_images']
+                }
+            else:
+                from django.conf import settings
+                max_concurrent = getattr(settings, 'OLLAMA_DEFAULT_CONCURRENT', 3)
+                user_image_info = {
+                    'user_id': request.user.id,
+                    'max_concurrent': max_concurrent,
+                    'active_count': 0,
+                    'total_images': 0
+                }
+
+        from django.conf import settings
+        config_info = {
+            'default_concurrent': getattr(settings, 'OLLAMA_DEFAULT_CONCURRENT', 3),
+            'global_max_concurrent': getattr(settings, 'OLLAMA_GLOBAL_MAX_CONCURRENT', 10),
+            'analysis_timeout': getattr(settings, 'OLLAMA_ANALYSIS_TIMEOUT', 300),
+        }
+
+        return Response({
+            'code': 200,
+            'message': '获取批量并发状态成功',
+            'data': {
+                'image_concurrency': {
+                    'active_images': image_active_info,
+                    'user_info': user_image_info,
+                    'controller_type': 'image_batch_concurrency_controller'
+                },
+                'config': config_info
+            }
+        })
+
+    @action(detail=False, methods=['get'])
+    def image_concurrency_status(self, request):
+        """获取图片级并发状态详情"""
+        handler = BatchStatusHandler(self)
+        return handler.batch_get_image_concurrency_status()
