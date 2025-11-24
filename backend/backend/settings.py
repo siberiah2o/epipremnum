@@ -263,3 +263,9 @@ LOGGING = {
     },
 }
 
+
+
+# Ollama并发控制配置
+OLLAMA_DEFAULT_CONCURRENT = 3  # 默认并发数
+OLLAMA_GLOBAL_MAX_CONCURRENT = 10  # 全局最大并发数
+OLLAMA_ANALYSIS_TIMEOUT = 300  # 单个分析任务超时时间（秒）

@@ -10,6 +10,7 @@ import re
 from typing import Dict, Any
 from django.conf import settings
 from .prompt_templates import AnalysisPromptTemplates, TaskTypeConfig
+from .concurrency_controller import concurrency_controller
 
 logger = logging.getLogger(__name__)
 
@@ -51,23 +52,42 @@ class OllamaImageAnalyzer:
                 )
                 tasks.append((task_type, prompt))
 
-            # 执行多个分析任务
-            for task_name, task_prompt in tasks:
-                try:
-                    data = self._prepare_single_analysis(analysis, task_prompt)
-                    api_result = self._call_api(analysis.model.endpoint.url, analysis.model.name, data)
+            # 根据用户选项决定是否使用并发执行
+            use_concurrency = options.get('use_concurrency', False)
 
-                    if api_result['success']:
-                        task_result = self._process_single_result(api_result['response'], task_name)
-                        results[task_name] = task_result
-                        logger.info(f"成功完成 {task_name} 分析")
-                    else:
-                        failed_tasks.append(f"{task_name}: {api_result['error']}")
-                        logger.error(f"{task_name} 分析失败: {api_result['error']}")
+            if use_concurrency and len(tasks) > 1:
+                # 并发执行模式
+                logger.info(f"使用并发模式执行 {len(tasks)} 个任务")
+                concurrent_result = concurrency_controller.execute_tasks_concurrently(
+                    tasks=tasks,
+                    analysis=analysis,
+                    executor_callback=self._prepare_single_analysis
+                )
+                results = concurrent_result['results']
+                failed_tasks = concurrent_result['failed_tasks']
 
-                except Exception as e:
-                    failed_tasks.append(f"{task_name}: {str(e)}")
-                    logger.error(f"{task_name} 分析异常: {str(e)}")
+                logger.info(f"并发执行完成: 成功 {len(results)} 个，失败 {len(failed_tasks)} 个")
+            else:
+                # 串行执行模式（原有逻辑）
+                execution_mode = "并发模式" if use_concurrency else "串行模式"
+                logger.info(f"使用{execution_mode}执行 {len(tasks)} 个任务")
+
+                for task_name, task_prompt in tasks:
+                    try:
+                        data = self._prepare_single_analysis(analysis, task_prompt)
+                        api_result = self._call_api(analysis.model.endpoint.url, analysis.model.name, data)
+
+                        if api_result['success']:
+                            task_result = self._process_single_result(api_result['response'], task_name)
+                            results[task_name] = task_result
+                            logger.info(f"成功完成 {task_name} 分析")
+                        else:
+                            failed_tasks.append(f"{task_name}: {api_result['error']}")
+                            logger.error(f"{task_name} 分析失败: {api_result['error']}")
+
+                    except Exception as e:
+                        failed_tasks.append(f"{task_name}: {str(e)}")
+                        logger.error(f"{task_name} 分析异常: {str(e)}")
 
             # 汇总结果
             final_result = self._combine_results(results, options)

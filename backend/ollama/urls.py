@@ -1,6 +1,7 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import OllamaEndpointViewSet, OllamaAIModelViewSet, OllamaAnalysisViewSet
+from .views.concurrency import ConcurrencyStatusView
 
 # 创建路由器并注册 ViewSet
 router = DefaultRouter()
@@ -12,4 +13,5 @@ app_name = 'ollama'
 
 urlpatterns = [
     path('', include(router.urls)),
+    path('concurrency/status/', ConcurrencyStatusView.as_view(), name='concurrency-status'),
 ]

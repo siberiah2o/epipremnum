@@ -127,7 +127,7 @@ class OllamaImageAnalysisCreateSerializer(serializers.Serializer):
         allowed_fields = {
             'generate_title', 'generate_description', 'generate_prompt',
             'generate_categories', 'generate_tags', 'max_categories', 'max_tags',
-            'temperature', 'top_p', 'max_tokens'
+            'temperature', 'top_p', 'max_tokens', 'max_concurrent', 'use_concurrency'
         }
         for field in value:
             if field not in allowed_fields:
@@ -164,6 +164,17 @@ class OllamaImageAnalysisCreateSerializer(serializers.Serializer):
             max_tokens = value['max_tokens']
             if not isinstance(max_tokens, int) or not 1 <= max_tokens <= 2000:
                 raise serializers.ValidationError("max_tokens必须在1-2000之间")
+
+        # 验证并发控制选项
+        if 'max_concurrent' in value:
+            max_concurrent = value['max_concurrent']
+            if not isinstance(max_concurrent, int) or not 1 <= max_concurrent <= 20:
+                raise serializers.ValidationError("max_concurrent必须在1-20之间")
+
+        if 'use_concurrency' in value:
+            use_concurrency = value['use_concurrency']
+            if not isinstance(use_concurrency, bool):
+                raise serializers.ValidationError("use_concurrency必须是布尔值")
 
         return value
 

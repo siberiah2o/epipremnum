@@ -203,6 +203,13 @@ class AnalysisBatchHandler(BaseViewSetMixin):
                 message='单次批量操作最多支持20个文件'
             )
 
+        # 验证并发控制参数
+        concurrency_errors = self._validate_concurrency_options(options)
+        if concurrency_errors:
+            return BaseResponseHandler.error_response(
+                message=f'并发控制参数验证失败: {"; ".join(concurrency_errors)}'
+            )
+
         # 验证模型（如果有指定）
         if model_name:
             model_validation = self._validate_model_for_user(model_name)
@@ -332,3 +339,30 @@ class AnalysisBatchHandler(BaseViewSetMixin):
                 'valid': False,
                 'error': f'验证模型失败: {str(e)}'
             }
+    def _validate_concurrency_options(self, options):
+        """验证并发控制选项"""
+        errors = []
+
+        # 验证并发数设置
+        if 'max_concurrent' in options:
+            max_concurrent = options['max_concurrent']
+            if not isinstance(max_concurrent, int) or not 1 <= max_concurrent <= 20:
+                errors.append('max_concurrent必须在1-20之间')
+
+        # 验证并发模式开关
+        if 'use_concurrency' in options:
+            use_concurrency = options['use_concurrency']
+            if not isinstance(use_concurrency, bool):
+                errors.append('use_concurrency必须是布尔值')
+
+        # 检查并发逻辑一致性
+        use_concurrency = options.get('use_concurrency', False)
+        max_concurrent = options.get('max_concurrent', None)
+
+        # 如果启用了并发但没有指定最大并发数，给出警告
+        if use_concurrency and max_concurrent is None:
+            from django.conf import settings
+            default_concurrent = getattr(settings, 'OLLAMA_DEFAULT_CONCURRENT', 3)
+            options['max_concurrent'] = default_concurrent  # 自动设置默认值
+
+        return errors
