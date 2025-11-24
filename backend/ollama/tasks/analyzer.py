@@ -9,6 +9,7 @@ import requests
 import re
 from typing import Dict, Any
 from django.conf import settings
+from .prompt_templates import AnalysisPromptTemplates, TaskTypeConfig
 
 logger = logging.getLogger(__name__)
 
@@ -34,26 +35,21 @@ class OllamaImageAnalyzer:
             results = {}
             failed_tasks = []
 
-            # 确定需要执行的分析任务
-            tasks = []
-            if options.get('generate_title', False):
-                tasks.append(('title', self._generate_title_prompt()))
-            if options.get('generate_description', False):
-                tasks.append(('description', self._generate_description_prompt()))
-            if options.get('generate_categories', False):
-                tasks.append(('categories', self._generate_categories_prompt(options.get('max_categories', 5))))
-            if options.get('generate_tags', False):
-                tasks.append(('tags', self._generate_tags_prompt(options.get('max_tags', 10))))
-            if options.get('generate_prompt', False):
-                tasks.append(('prompt', self._generate_ai_prompt_prompt()))
+            # 根据用户选项确定需要执行的分析任务
+            enabled_tasks = TaskTypeConfig.get_enabled_tasks(options)
 
             # 如果没有指定任何选项，使用默认分析
-            if not tasks:
-                tasks = [
-                    ('title', self._generate_title_prompt()),
-                    ('description', self._generate_description_prompt()),
-                    ('tags', self._generate_tags_prompt(5))
-                ]
+            if not enabled_tasks:
+                enabled_tasks = TaskTypeConfig.get_default_tasks()
+
+            # 生成任务列表
+            tasks = []
+            for task_type in enabled_tasks:
+                prompt = TaskTypeConfig.get_task_prompt(
+                    task_type,
+                    options.get(f'max_{task_type}') if task_type in ['categories', 'tags'] else None
+                )
+                tasks.append((task_type, prompt))
 
             # 执行多个分析任务
             for task_name, task_prompt in tasks:
@@ -135,60 +131,7 @@ class OllamaImageAnalyzer:
             }
         }
 
-    def _generate_title_prompt(self):
-        """生成标题分析的提示词"""
-        return """请为这张图片生成一个简洁、描述性的标题。
-要求：
-- 标题应该准确反映图片的主要内容
-- 长度控制在5-20个字之间
-- 避免使用"图片"、"图像"等通用词
-
-请直接返回标题，不需要其他说明。"""
-
-    def _generate_description_prompt(self):
-        """生成描述分析的提示词"""
-        return """请详细描述这张图片的内容。
-要求：
-- 描述图片中的主要对象、场景和活动
-- 包含颜色、风格、构图等视觉元素
-- 长度控制在50-200字之间
-- 客观描述，避免过度想象
-
-请直接返回描述内容，不需要其他说明。"""
-
-    def _generate_categories_prompt(self, max_categories):
-        """生成分类分析的提示词"""
-        return f"""请为这张图片生成分类标签。
-要求：
-- 生成最多{max_categories}个相关的分类
-- 分类应该基于图片的内容、风格和主题
-- 使用简洁的中文分类名
-- 每个分类2-6个字
-
-请用逗号分隔返回分类列表，例如：风景, 自然, 山脉"""
-
-    def _generate_tags_prompt(self, max_tags):
-        """生成标签分析的提示词"""
-        return f"""请为这张图片提取关键词标签。
-要求：
-- 生成最多{max_tags}个相关的标签
-- 标签应该涵盖图片中的对象、场景、风格、情感等
-- 使用简洁的中文关键词
-- 每个标签1-4个字
-
-请用逗号分隔返回标签列表，例如：山水, 日落, 橙色, 宁静"""
-
-    def _generate_ai_prompt_prompt(self):
-        """生成AI绘画提示词的提示词"""
-        return """请为这张图片生成适合AI绘画的提示词。
-要求：
-- 描述如何重现类似这张图片的AI绘画
-- 包含风格、构图、色彩、主体等要素
-- 使用英文关键词，符合AI绘画工具的习惯
-- 长度控制在20-80个单词
-
-请直接返回AI绘画提示词，不需要其他说明。"""
-
+    
     def _call_api(self, endpoint_url: str, model_name: str, data: Dict) -> Dict:
         """调用Ollama API"""
         api_url = f"{endpoint_url.rstrip('/')}/api/generate"
