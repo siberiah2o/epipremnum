@@ -1,5 +1,5 @@
 """
-Ollama图片分析任务管理器
+Ollama图片分析任务服务
 负责任务的创建、查询、重试等管理操作
 """
 
@@ -9,15 +9,15 @@ from django.contrib.auth import get_user_model
 from django_async_manager.models import Task
 
 from ..models import OllamaImageAnalysis, OllamaAIModel
-from .async_tasks import analyze_image_with_ollama_task, cancel_analysis_task
-from .atomic_state_manager import atomic_state_manager
+from .task_workers import analyze_image_task, cancel_analysis_task
+from .state_manager import state_manager
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
 
 
-class OllamaTaskManager:
-    """Ollama图片分析任务管理器"""
+class TaskService:
+    """Ollama图片分析任务服务"""
 
     def create_task(self, user, media_id: int, model_name: Optional[str] = None,
                    analysis_options: Optional[Dict] = None, prompt: Optional[str] = None) -> Dict:
@@ -35,8 +35,8 @@ class OllamaTaskManager:
             if not model:
                 return {'success': False, 'error': '没有可用的分析模型'}
 
-            # 使用原子状态管理器创建分析记录
-            analysis, created = atomic_state_manager.create_analysis_safely(
+            # 使用状态管理器创建分析记录
+            analysis, created = state_manager.create_analysis_safely(
                 media=media,
                 model=model,
                 analysis_options=analysis_options or {},
@@ -59,7 +59,7 @@ class OllamaTaskManager:
                 }
 
             # 启动异步任务
-            task = analyze_image_with_ollama_task.run_async(analysis_id=analysis.id)
+            task = analyze_image_task.run_async(analysis_id=analysis.id)
             analysis.task_id = task.id
             analysis.save(update_fields=['task_id'])
 
@@ -87,8 +87,6 @@ class OllamaTaskManager:
                 id=analysis_id, media__user=user
             )
 
-            task_info = self._get_task_info(analysis.task_id)
-
             return {
                 'success': True,
                 'analysis_id': analysis.id,
@@ -102,7 +100,6 @@ class OllamaTaskManager:
                 'retry_count': analysis.retry_count,
                 'model_name': analysis.model.name if analysis.model else None,
                 'can_retry': analysis.can_retry(),
-                'async_task_status': task_info.get('status') if task_info else None,
                 'error_message': analysis.error_message
             }
 
@@ -129,7 +126,7 @@ class OllamaTaskManager:
             analysis.increment_retry()
             
             # 重新启动分析任务
-            task = analyze_image_with_ollama_task.run_async(analysis_id=analysis_id)
+            task = analyze_image_task.run_async(analysis_id=analysis_id)
             analysis.task_id = task.id
             analysis.save(update_fields=['task_id'])
             
@@ -228,20 +225,95 @@ class OllamaTaskManager:
 
         return queryset.filter(is_default=True).first() or queryset.first()
 
-    def _get_task_info(self, task_id: Optional[str]) -> Optional[Dict]:
-        """获取异步任务信息"""
-        if not task_id:
-            return None
-
+    
+    def get_user_statistics(self, user) -> Dict:
+        """获取用户任务统计"""
         try:
-            task = Task.objects.get(id=task_id)
+            # 使用状态管理器获取统计信息
+            user_stats = state_manager.get_user_task_statistics(user.id)
+            
             return {
-                'id': task.id,
-                'status': task.status,
-                'created_at': task.created_at,
-                'started_at': task.started_at,
-                'completed_at': task.completed_at,
-                'error_message': task.last_errors[0] if task.last_errors else None
+                'success': True,
+                'statistics': user_stats
             }
-        except Task.DoesNotExist:
-            return None
+            
+        except Exception as e:
+            logger.error(f"❌ 获取用户统计失败: {str(e)}")
+            return {'success': False, 'error': f'获取统计失败: {str(e)}'}
+
+    def cleanup_old_tasks(self, user, days_old: int = 30) -> Dict:
+        """清理用户的旧任务"""
+        try:
+            # 使用状态管理器清理旧分析记录
+            cleanup_result = state_manager.cleanup_old_analyses(days_old)
+            
+            return {
+                'success': True,
+                'deleted_count': cleanup_result.get('deleted_count', 0),
+                'message': f"已清理 {cleanup_result.get('deleted_count', 0)} 个旧任务"
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ 清理旧任务失败: {str(e)}")
+            return {'success': False, 'error': f'清理失败: {str(e)}'}
+
+    def batch_analyze(self, user, media_ids: list, model_name: Optional[str] = None,
+                     analysis_options: Optional[Dict] = None) -> Dict:
+        """批量分析任务"""
+        try:
+            from .batch_handler import batch_handler
+            
+            # 使用批量处理器执行批量分析
+            result = batch_handler.analyze_images_with_concurrency_task(
+                user_id=user.id,
+                media_ids=media_ids,
+                model_name=model_name,
+                analysis_options=analysis_options or {}
+            )
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"❌ 批量分析失败: {str(e)}")
+            return {'success': False, 'error': f'批量分析失败: {str(e)}'}
+
+    def cancel_all_user_tasks(self, user) -> Dict:
+        """取消用户所有任务"""
+        try:
+            from .task_workers import cancel_all_user_tasks_task
+            
+            # 启动取消所有用户任务的异步任务
+            task = cancel_all_user_tasks_task.run_async(user_id=user.id)
+            
+            logger.info(f"🚫 取消用户所有任务启动: user_id={user.id}, task_id={task.id}")
+            
+            return {
+                'success': True,
+                'task_id': str(task.id),
+                'message': '已启动取消所有任务的异步操作'
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ 取消所有任务失败: {str(e)}")
+            return {'success': False, 'error': f'取消所有任务失败: {str(e)}'}
+
+    def get_batch_status(self, user) -> Dict:
+        """获取批量处理状态"""
+        try:
+            from .batch_handler import batch_handler
+            
+            # 使用批量处理器获取状态摘要
+            status_summary = batch_handler.get_status_summary(user)
+            
+            return {
+                'success': True,
+                'status': status_summary
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ 获取批量状态失败: {str(e)}")
+            return {'success': False, 'error': f'获取批量状态失败: {str(e)}'}
+
+
+# 全局任务服务实例
+task_service = TaskService()

@@ -280,8 +280,8 @@ class OllamaImageAnalysis(models.Model):
 
     def mark_as_started(self):
         """标记任务开始（使用原子状态管理）"""
-        from .tasks.atomic_state_manager import atomic_state_manager
-        atomic_state_manager.update_analysis_status(
+        from .tasks.state_manager import state_manager
+        state_manager.update_analysis_status(
             analysis_id=self.id,
             from_status='pending',
             to_status='processing'
@@ -289,8 +289,8 @@ class OllamaImageAnalysis(models.Model):
 
     def mark_as_completed(self, processing_time_ms=None):
         """标记任务完成（使用原子状态管理）"""
-        from .tasks.atomic_state_manager import atomic_state_manager
-        atomic_state_manager.update_analysis_status(
+        from .tasks.state_manager import state_manager
+        state_manager.update_analysis_status(
             analysis_id=self.id,
             from_status='processing',
             to_status='completed',
@@ -299,8 +299,8 @@ class OllamaImageAnalysis(models.Model):
 
     def mark_as_failed(self, error_message=None):
         """标记任务失败（使用原子状态管理）"""
-        from .tasks.atomic_state_manager import atomic_state_manager
-        atomic_state_manager.update_analysis_status(
+        from .tasks.state_manager import state_manager
+        state_manager.update_analysis_status(
             analysis_id=self.id,
             from_status=None,  # 允许从任何状态转换为失败
             to_status='failed',
@@ -309,8 +309,8 @@ class OllamaImageAnalysis(models.Model):
 
     def increment_retry(self):
         """增加重试次数（使用原子状态管理）"""
-        from .tasks.atomic_state_manager import atomic_state_manager
-        atomic_state_manager.increment_retry_count(self.id)
+        from .tasks.state_manager import state_manager
+        state_manager.increment_retry_count(self.id)
 
     def update_media_with_analysis_result(self, result_data):
         """将分析结果更新到媒体模型字段上（使用原子状态管理）"""
@@ -318,5 +318,5 @@ class OllamaImageAnalysis(models.Model):
             return
 
         # 使用原子状态管理器更新媒体
-        from .tasks.atomic_state_manager import atomic_state_manager
-        atomic_state_manager.update_media_with_analysis_result(self, result_data)
+        from .tasks.state_manager import state_manager
+        state_manager.update_media_with_analysis_result(self, result_data)

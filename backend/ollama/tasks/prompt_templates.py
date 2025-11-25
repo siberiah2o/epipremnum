@@ -4,11 +4,11 @@
 """
 
 
-class AnalysisPromptTemplates:
+class PromptTemplates:
     """图片分析提示词模板类"""
 
     @staticmethod
-    def generate_title_prompt():
+    def title_prompt():
         """生成标题分析的提示词"""
         return """请为这张图片生成一个简洁、描述性的标题。
 要求：
@@ -19,7 +19,7 @@ class AnalysisPromptTemplates:
 请直接返回标题，不需要其他说明。"""
 
     @staticmethod
-    def generate_description_prompt():
+    def description_prompt():
         """生成描述分析的提示词"""
         return """请详细描述这张图片的内容。
 要求：
@@ -31,7 +31,7 @@ class AnalysisPromptTemplates:
 请直接返回描述内容，不需要其他说明。"""
 
     @staticmethod
-    def generate_categories_prompt(max_categories):
+    def categories_prompt(max_categories):
         """生成分类分析的提示词"""
         return f"""请为这张图片生成分类标签。
 要求：
@@ -43,7 +43,7 @@ class AnalysisPromptTemplates:
 请用逗号分隔返回分类列表，例如：风景, 自然, 山脉"""
 
     @staticmethod
-    def generate_tags_prompt(max_tags):
+    def tags_prompt(max_tags):
         """生成标签分析的提示词"""
         return f"""请为这张图片提取关键词标签。
 要求：
@@ -55,7 +55,7 @@ class AnalysisPromptTemplates:
 请用逗号分隔返回标签列表，例如：山水, 日落, 橙色, 宁静"""
 
     @staticmethod
-    def generate_ai_prompt_prompt():
+    def ai_prompt_prompt():
         """生成AI绘画提示词的提示词"""
         return """请为这张图片生成适合AI绘画的提示词。
 要求：
@@ -67,7 +67,7 @@ class AnalysisPromptTemplates:
 请直接返回AI绘画提示词，不需要其他说明。"""
 
     @staticmethod
-    def generate_default_tags_prompt():
+    def default_tags_prompt():
         """生成默认标签分析提示词（用于默认分析）"""
         return """请为这张图片提取关键词标签。
 要求：
@@ -79,34 +79,34 @@ class AnalysisPromptTemplates:
 请用逗号分隔返回标签列表，例如：山水, 日落, 橙色, 宁静"""
 
 
-class TaskTypeConfig:
+class TaskConfig:
     """分析任务配置类"""
 
     # 任务类型映射
     TASK_TYPES = {
         'title': {
             'name': '标题生成',
-            'prompt_method': AnalysisPromptTemplates.generate_title_prompt,
+            'prompt_method': PromptTemplates.title_prompt,
             'default_max': None
         },
         'description': {
             'name': '描述生成',
-            'prompt_method': AnalysisPromptTemplates.generate_description_prompt,
+            'prompt_method': PromptTemplates.description_prompt,
             'default_max': None
         },
         'categories': {
             'name': '分类生成',
-            'prompt_method': AnalysisPromptTemplates.generate_categories_prompt,
+            'prompt_method': PromptTemplates.categories_prompt,
             'default_max': 5
         },
         'tags': {
             'name': '标签生成',
-            'prompt_method': AnalysisPromptTemplates.generate_tags_prompt,
+            'prompt_method': PromptTemplates.tags_prompt,
             'default_max': 10
         },
         'prompt': {
             'name': 'AI绘画提示词',
-            'prompt_method': AnalysisPromptTemplates.generate_ai_prompt_prompt,
+            'prompt_method': PromptTemplates.ai_prompt_prompt,
             'default_max': None
         }
     }
@@ -144,3 +144,4 @@ class TaskTypeConfig:
     def get_default_tasks(cls):
         """获取默认任务列表"""
         return cls.DEFAULT_TASKS.copy()
+

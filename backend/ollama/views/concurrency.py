@@ -6,7 +6,7 @@ from rest_framework import permissions, status
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.conf import settings
-from ..tasks.concurrency_controller import concurrency_controller
+from ..tasks.concurrency_manager import concurrency_manager
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ class ConcurrencyStatusView(APIView):
     def get(self, request):
         """获取当前并发状态"""
         try:
-            active_info = concurrency_controller.get_active_tasks_info()
+            active_info = concurrency_manager.get_active_tasks_info()
 
             # 添加配置信息
             config_info = {

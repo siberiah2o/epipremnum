@@ -171,7 +171,7 @@ class CancellableTask:
             raise
 
 
-class CancellableTaskManager:
+class CancellationManager:
     """可取消任务管理器"""
 
     def __init__(self):
@@ -263,4 +263,4 @@ class CancellableTaskManager:
 
 
 # 全局任务管理器实例
-task_manager = CancellableTaskManager()
+cancellation_manager = CancellationManager()

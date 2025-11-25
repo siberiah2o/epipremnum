@@ -11,9 +11,7 @@ from rest_framework.decorators import action
 from .base import BaseResponseHandler, BaseViewSetMixin
 from typing import Dict, Any
 from ..serializers import (
-    OllamaImageAnalysisCreateSerializer,
-    OllamaImageAnalysisTaskStatusSerializer,
-    OllamaImageAnalysisTaskListSerializer
+    OllamaImageAnalysisCreateSerializer
 )
 from django.conf import settings
 
@@ -27,8 +25,7 @@ class BatchAnalysisHandler(BaseViewSetMixin):
 
     def batch_analyze(self):
         """批量分析接口"""
-        from ..models import Media, OllamaAIModel, OllamaImageAnalysis
-        from ..tasks.async_tasks import analyze_batch_images_task
+        from ..tasks.task_service import task_service
 
         # 获取请求参数
         media_ids = self.request.data.get('media_ids', [])
@@ -46,112 +43,28 @@ class BatchAnalysisHandler(BaseViewSetMixin):
                 message='单次批量操作最多支持50个文件'
             )
 
-        # 验证模型
-        try:
-            model = OllamaAIModel.objects.get(
-                name=model_name,
-                endpoint__created_by=self.request.user,
-                is_active=True,
-                is_vision_capable=True
-            )
-        except OllamaAIModel.DoesNotExist:
-            return BaseResponseHandler.error_response(
-                message=f'模型 "{model_name}" 不存在或不支持视觉分析'
-            )
-
-        # 验证媒体文件
-        media_items = Media.objects.filter(
-            id__in=media_ids,
-            user=self.request.user
+        # 直接使用 task_service 进行批量分析
+        result = task_service.batch_analyze(
+            user=self.request.user,
+            media_ids=media_ids,
+            model_name=model_name,
+            analysis_options=options
         )
 
-        if len(media_items) != len(media_ids):
-            found_ids = [item.id for item in media_items]
-            missing_ids = [mid for mid in media_ids if mid not in found_ids]
+        if result['success']:
+            return BaseResponseHandler.success_response(
+                message='批量分析任务已启动',
+                data=result
+            )
+        else:
             return BaseResponseHandler.error_response(
-                message=f'以下媒体文件不存在或无权访问: {missing_ids}'
+                message=result['error']
             )
-
-        # 处理并发控制参数
-        max_concurrent = options.get('max_concurrent', getattr(settings, 'OLLAMA_DEFAULT_CONCURRENT', 3))
-        use_concurrency = options.get('use_concurrency', True)
-
-        if not isinstance(max_concurrent, int) or max_concurrent < 1 or max_concurrent > 20:
-            return BaseResponseHandler.error_response(
-                message='max_concurrent必须在1-20之间'
-            )
-
-        # 使用原子状态管理器创建分析任务记录
-        from ..tasks.atomic_state_manager import atomic_state_manager
-        analysis_tasks = []
-        for media in media_items:
-            analysis, created = atomic_state_manager.create_analysis_safely(
-                media=media,
-                model=model,
-                analysis_options=options
-            )
-            analysis_tasks.append(analysis)
-
-        # 启动异步批量处理任务
-        try:
-            task = analyze_batch_images_task.run_async(
-                user_id=self.request.user.id,
-                analysis_ids=[analysis.id for analysis in analysis_tasks],
-                model_name=model_name,
-                max_concurrent=max_concurrent if use_concurrency else 1
-            )
-
-            logger.info(f"启动批量分析任务: task_id={task.id}, 媒体数量={len(media_items)}, 并发数={max_concurrent}")
-
-        except Exception as e:
-            logger.error(f"启动批量分析任务失败: {str(e)}")
-            # 使用原子状态管理器取消已创建的分析任务
-            try:
-                from ..tasks.atomic_state_manager import atomic_state_manager
-                analysis_ids = [a.id for a in analysis_tasks]
-                atomic_state_manager.batch_update_status(
-                    analysis_ids=analysis_ids,
-                    from_status='pending',
-                    to_status='failed',
-                    error_message=f'批量任务启动失败: {str(e)}'
-                )
-            except Exception as update_error:
-                logger.error(f"批量更新失败状态时出错: {str(update_error)}")
-            
-            return BaseResponseHandler.error_response(
-                message=f'启动批量分析任务失败: {str(e)}'
-            )
-
-        # 构建响应数据
-        submitted_tasks = []
-        for analysis in analysis_tasks:
-            submitted_tasks.append({
-                'media_id': analysis.media.id,
-                'media_title': analysis.media.title or f"图片_{analysis.media.id}",
-                'analysis_id': analysis.id,
-                'status': 'pending',
-                'message': '批量分析任务已启动'
-            })
-
-        return BaseResponseHandler.success_response(
-            message=f'批量分析任务已启动: {len(media_items)} 个文件已提交',
-            data={
-                'batch_info': {
-                    'task_id': str(task.id),  # 异步任务队列ID
-                    'total_media': len(media_items),
-                    'max_concurrent': max_concurrent,
-                    'use_concurrency': use_concurrency,
-                    'model_name': model_name
-                },
-                'submitted_tasks': submitted_tasks,
-                'total_count': len(media_items)
-            }
-        )
 
     def batch_cancel(self):
         """批量取消任务接口"""
         from ..models import OllamaImageAnalysis
-        from ..tasks.async_tasks import cancel_batch_tasks_task
+        from ..tasks.task_workers import cancel_batch_tasks_task
 
         analysis_ids = self.request.data.get('analysis_ids', [])
         task_ids = self.request.data.get('task_ids', [])
@@ -233,9 +146,9 @@ class BatchAnalysisHandler(BaseViewSetMixin):
     def cancel_all_tasks(self):
         """取消所有任务接口"""
         from ..models import OllamaImageAnalysis
-        from ..tasks.async_tasks import cancel_all_user_tasks_task
-        from ..tasks.atomic_state_manager import atomic_state_manager
-        from ..tasks.concurrency_controller import concurrency_controller
+        from ..tasks.task_workers import cancel_all_user_tasks_task
+        from ..tasks.state_manager import state_manager
+        from ..tasks.concurrency_manager import concurrency_manager
 
         # 立即更新数据库中的任务状态
         try:
@@ -249,7 +162,7 @@ class BatchAnalysisHandler(BaseViewSetMixin):
             
             if analysis_ids:
                 # 使用原子状态管理器立即更新状态为已取消
-                update_result = atomic_state_manager.batch_update_status(
+                update_result = state_manager.batch_update_status(
                     analysis_ids=analysis_ids,
                     from_status=['pending', 'processing'],
                     to_status='cancelled',
@@ -270,7 +183,7 @@ class BatchAnalysisHandler(BaseViewSetMixin):
 
         # 立即取消并发控制器中的正在执行的任务
         try:
-            concurrent_cancel_result = concurrency_controller.cancel_user_tasks(self.request.user.id)
+            concurrent_cancel_result = concurrency_manager.cancel_user_tasks(self.request.user.id)
             concurrent_cancelled_count = concurrent_cancel_result['cancelled_count']
             logger.info(f"并发控制器取消任务: {concurrent_cancelled_count} 个")
             cancelled_count += concurrent_cancelled_count
@@ -289,8 +202,7 @@ class BatchAnalysisHandler(BaseViewSetMixin):
                 message=f'取消所有任务已启动，已立即取消 {cancelled_count} 个任务',
                 data={
                     'task_id': str(task.id),
-                    'user_id': self.request.user.id,
-                    'immediately_cancelled_count': cancelled_count
+                    'user_id': self.request.user.id
                 }
             )
 
@@ -302,29 +214,43 @@ class BatchAnalysisHandler(BaseViewSetMixin):
 
     def get_batch_status(self):
         """获取批量任务状态概览"""
-        from ..models import OllamaImageAnalysis
-        
-        # 获取用户的分析任务统计
-        user_analysis_stats = {}
-        for status in ['pending', 'processing', 'completed', 'failed', 'cancelled']:
-            count = OllamaImageAnalysis.objects.filter(
-                media__user=self.request.user,
-                status=status
-            ).count()
-            user_analysis_stats[status] = count
-        
-        # 获取最近的分析任务
-        recent_analyses = OllamaImageAnalysis.objects.filter(
-            media__user=self.request.user
-        ).order_by('-created_at')[:10]
-        
-        recent_serializer = OllamaImageAnalysisTaskListSerializer(recent_analyses, many=True)
-        
-        return BaseResponseHandler.success_response(
-            message=f'获取批量任务状态概览成功，正在运行 {user_analysis_stats["processing"]} 个任务',
-            data={
-                'analysis_stats': user_analysis_stats,
-                'total_analysis_tasks': sum(user_analysis_stats.values()),
-                'recent_tasks': recent_serializer.data
-            }
+        from ..tasks.task_service import task_service
+
+        # 获取批量状态摘要
+        status_result = task_service.get_batch_status(self.request.user)
+
+        # 获取最近的分析任务列表
+        recent_tasks_result = task_service.list_tasks(
+            user=self.request.user,
+            limit=10,
+            offset=0
         )
+
+        if status_result['success'] and recent_tasks_result['success']:
+            # 从批量状态中提取统计信息
+            batch_status = status_result['status']
+            user_task_stats = batch_status.get('user_task_stats', {})
+
+            # 计算正在运行的任务数（从用户任务统计中）
+            processing_count = user_task_stats.get('processing', 0)
+
+            # 计算总任务数（只计算用户任务统计中的数值）
+            total_tasks = 0
+            for key, value in user_task_stats.items():
+                if isinstance(value, (int, float)):
+                    total_tasks += value
+
+            return BaseResponseHandler.success_response(
+                message=f'获取批量任务状态概览成功，正在运行 {processing_count} 个任务',
+                data={
+                    'analysis_stats': user_task_stats,
+                    'total_analysis_tasks': total_tasks,
+                    'recent_tasks': recent_tasks_result['tasks']
+                }
+            )
+        else:
+            # 如果其中任何一个失败，返回错误
+            error_msg = status_result.get('error') or recent_tasks_result.get('error')
+            return BaseResponseHandler.error_response(
+                message=f'获取批量状态失败: {error_msg}'
+            )

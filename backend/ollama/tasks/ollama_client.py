@@ -1,5 +1,5 @@
 """
-Ollama图片分析器
+Ollama图片分析客户端
 负责与Ollama API交互进行图片分析
 """
 import logging
@@ -9,14 +9,14 @@ import requests
 import re
 from typing import Dict, Any
 from django.conf import settings
-from .analysis_templates import AnalysisPromptTemplates, TaskTypeConfig
-from .concurrency_controller import concurrency_controller
+from .prompt_templates import PromptTemplates, TaskConfig
+from .concurrency_manager import concurrency_manager
 
 logger = logging.getLogger(__name__)
 
 
 class OllamaImageAnalyzer:
-    """Ollama图片分析器"""
+    """Ollama图片分析客户端"""
 
     def __init__(self):
         self.timeout = getattr(settings, 'OLLAMA_ANALYSIS_TIMEOUT', 300)
@@ -37,64 +37,50 @@ class OllamaImageAnalyzer:
             failed_tasks = []
 
             # 根据用户选项确定需要执行的分析任务
-            enabled_tasks = TaskTypeConfig.get_enabled_tasks(options)
+            enabled_tasks = TaskConfig.get_enabled_tasks(options)
 
             # 如果没有指定任何选项，使用默认分析
             if not enabled_tasks:
-                enabled_tasks = TaskTypeConfig.get_default_tasks()
+                enabled_tasks = TaskConfig.get_default_tasks()
 
             # 生成任务列表
             tasks = []
             for task_type in enabled_tasks:
-                prompt = TaskTypeConfig.get_task_prompt(
+                prompt = TaskConfig.get_task_prompt(
                     task_type,
                     options.get(f'max_{task_type}') if task_type in ['categories', 'tags'] else None
                 )
                 tasks.append((task_type, prompt))
 
-            # 根据用户选项决定是否使用并发执行
-            use_concurrency = options.get('use_concurrency', False)
+            # 修正：强制使用串行执行模式，因为图片间的并发在批量处理层面控制
+            # 每张图片内部的4个分析项目（标题、描述、分类、标签）必须串行执行以避免API冲突
+            logger.info(f"使用串行模式执行 {len(tasks)} 个任务（每张图片内的分析项目）")
 
-            if use_concurrency and len(tasks) > 1:
-                # 并发执行模式
-                logger.info(f"使用并发模式执行 {len(tasks)} 个任务")
-                concurrent_result = concurrency_controller.execute_tasks_concurrently(
-                    tasks=tasks,
-                    analysis=analysis,
-                    executor_callback=self._prepare_single_analysis
-                )
-                results = concurrent_result['results']
-                failed_tasks = concurrent_result['failed_tasks']
+            for task_name, task_prompt in tasks:
+                try:
+                    data = self._prepare_single_analysis(analysis, task_prompt)
+                    api_result = self._call_api(analysis.model.endpoint.url, analysis.model.name, data)
 
-                logger.info(f"并发执行完成: 成功 {len(results)} 个，失败 {len(failed_tasks)} 个")
-            else:
-                # 串行执行模式（原有逻辑）
-                execution_mode = "并发模式" if use_concurrency else "串行模式"
-                logger.info(f"使用{execution_mode}执行 {len(tasks)} 个任务")
-
-                for task_name, task_prompt in tasks:
-                    try:
-                        data = self._prepare_single_analysis(analysis, task_prompt)
-                        api_result = self._call_api(analysis.model.endpoint.url, analysis.model.name, data)
-
-                        if api_result['success']:
-                            # 从 Ollama API 响应中提取实际文本
-                            response_dict = api_result['response']
-                            if isinstance(response_dict, dict) and 'response' in response_dict:
-                                response_text = response_dict['response']
-                            else:
-                                response_text = str(response_dict)
-
-                            task_result = self._process_single_result(response_text, task_name)
-                            results[task_name] = task_result
-                            logger.info(f"成功完成 {task_name} 分析")
+                    if api_result['success']:
+                        # 从 Ollama API 响应中提取实际文本
+                        response_dict = api_result['response']
+                        if isinstance(response_dict, dict) and 'response' in response_dict:
+                            response_text = response_dict['response']
                         else:
-                            failed_tasks.append(f"{task_name}: {api_result['error']}")
-                            logger.error(f"{task_name} 分析失败: {api_result['error']}")
+                            response_text = str(response_dict)
 
-                    except Exception as e:
-                        failed_tasks.append(f"{task_name}: {str(e)}")
-                        logger.error(f"{task_name} 分析异常: {str(e)}")
+                        task_result = self._process_single_result(response_text, task_name)
+                        results[task_name] = task_result
+                        logger.info(f"成功完成 {task_name} 分析")
+                    else:
+                        failed_tasks.append(f"{task_name}: {api_result['error']}")
+                        logger.error(f"{task_name} 分析失败: {api_result['error']}")
+
+                except Exception as e:
+                    failed_tasks.append(f"{task_name}: {str(e)}")
+                    logger.error(f"{task_name} 分析异常: {str(e)}")
+
+            logger.info(f"串行执行完成: 成功 {len(results)} 个，失败 {len(failed_tasks)} 个")
 
             # 汇总结果
             final_result = self._combine_results(results, options)
@@ -137,11 +123,11 @@ class OllamaImageAnalyzer:
             options = analysis.analysis_options
 
             # 根据用户选项确定需要执行的分析任务
-            enabled_tasks = TaskTypeConfig.get_enabled_tasks(options)
+            enabled_tasks = TaskConfig.get_enabled_tasks(options)
 
             # 如果没有指定任何选项，使用默认分析
             if not enabled_tasks:
-                enabled_tasks = TaskTypeConfig.get_default_tasks()
+                enabled_tasks = TaskConfig.get_default_tasks()
 
             # 检查任务是否被取消
             cancellable_task.check_cancelled()
@@ -149,7 +135,7 @@ class OllamaImageAnalyzer:
             # 生成任务列表
             tasks = []
             for task_type in enabled_tasks:
-                prompt = TaskTypeConfig.get_task_prompt(
+                prompt = TaskConfig.get_task_prompt(
                     task_type,
                     options.get(f'max_{task_type}') if task_type in ['categories', 'tags'] else None
                 )
@@ -158,8 +144,9 @@ class OllamaImageAnalyzer:
             # 检查任务是否被取消
             cancellable_task.check_cancelled()
 
-            # 强制使用串行模式（因为并发模式中的取消检查更复杂）
-            logger.info(f"使用支持取消的串行模式执行 {len(tasks)} 个任务")
+            # 修正：强制使用串行执行模式，因为图片间的并发在批量处理层面控制
+            # 每张图片内部的4个分析项目（标题、描述、分类、标签）必须串行执行以避免API冲突
+            logger.info(f"使用支持取消的串行模式执行 {len(tasks)} 个任务（每张图片内的分析项目）")
 
             results = {}
             failed_tasks = []
@@ -207,6 +194,8 @@ class OllamaImageAnalyzer:
                 except Exception as e:
                     failed_tasks.append(f"{task_name}: {str(e)}")
                     logger.error(f"{task_name} 分析异常: {str(e)}")
+
+            logger.info(f"支持取消的串行执行完成: 成功 {len(results)} 个，失败 {len(failed_tasks)} 个")
 
             # 检查最终取消状态
             cancellable_task.check_cancelled()
@@ -479,4 +468,3 @@ class OllamaImageAnalyzer:
 
         return combined
 
-    

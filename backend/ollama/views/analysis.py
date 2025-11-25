@@ -13,12 +13,10 @@ from typing import Dict, Any
 from ..serializers import (
     OllamaImageAnalysisCreateSerializer,
     OllamaImageAnalysisTaskCreateSerializer,
-    OllamaImageAnalysisTaskStatusSerializer,
-    OllamaImageAnalysisTaskListSerializer,
     OllamaImageAnalysisTaskRetrySerializer,
     OllamaImageAnalysisTaskCancelSerializer
 )
-from ..tasks.manager import OllamaTaskManager
+from ..tasks.task_service import task_service
 from django.utils import timezone
 
 
@@ -28,7 +26,7 @@ class AnalysisTaskHandler(BaseViewSetMixin):
     def __init__(self, viewset_instance):
         self.viewset = viewset_instance
         self.request = viewset_instance.request
-        self.task_manager = OllamaTaskManager()
+        self.task_service = task_service
 
     def create_task(self):
         """创建图片分析任务"""
@@ -46,8 +44,8 @@ class AnalysisTaskHandler(BaseViewSetMixin):
 
         # 使用原子状态管理器创建分析任务
         from ..models import Media, OllamaAIModel
-        from ..tasks.atomic_state_manager import atomic_state_manager
-        from ..tasks.async_tasks import analyze_image_with_ollama_task
+        from ..tasks.state_manager import state_manager
+        from ..tasks.task_workers import analyze_image_task
 
         try:
             # 验证媒体文件
@@ -79,15 +77,16 @@ class AnalysisTaskHandler(BaseViewSetMixin):
                     message='没有可用的视觉分析模型'
                 )
 
-            # 使用原子状态管理器创建分析任务
-            analysis, created = atomic_state_manager.create_analysis_safely(
+            # 使用状态管理器创建分析任务
+            analysis, created = state_manager.create_analysis_safely(
                 media=media,
                 model=model,
-                analysis_options=serializer.validated_data.get('options', {})
+                analysis_options=serializer.validated_data.get('options', {}),
+                prompt=serializer.validated_data.get('prompt')
             )
 
             # 启动异步分析任务
-            task = analyze_image_with_ollama_task.run_async(
+            task = analyze_image_task.run_async(
                 analysis_id=analysis.id
             )
 
@@ -125,15 +124,13 @@ class AnalysisTaskHandler(BaseViewSetMixin):
 
     def get_task_status(self, analysis_id):
         """获取任务状态"""
-        result = self.task_manager.get_task_status(analysis_id, self.request.user)
+        result = self.task_service.get_task_status(analysis_id, self.request.user)
 
         if result['success']:
-            # 序列化返回数据
-            response_serializer = OllamaImageAnalysisTaskStatusSerializer(result)
-
+            # 直接返回task_service处理后的数据
             return BaseResponseHandler.success_response(
                 message='获取任务状态成功',
-                data=response_serializer.data
+                data=result
             )
         else:
             return BaseResponseHandler.error_response(
@@ -147,7 +144,7 @@ class AnalysisTaskHandler(BaseViewSetMixin):
         limit = min(int(self.request.query_params.get('limit', 50)), 100)
         offset = max(int(self.request.query_params.get('offset', 0)), 0)
 
-        result = self.task_manager.list_tasks(
+        result = self.task_service.list_tasks(
             user=self.request.user,
             status_filter=status_filter,
             limit=limit,
@@ -155,14 +152,11 @@ class AnalysisTaskHandler(BaseViewSetMixin):
         )
 
         if result['success']:
-            # 序列化任务列表
-            task_list = result['tasks']
-            serializer = OllamaImageAnalysisTaskListSerializer(task_list, many=True)
-
+            # 直接返回task_service处理好的数据
             return BaseResponseHandler.success_response(
                 message='获取任务列表成功',
                 data={
-                    'tasks': serializer.data,
+                    'tasks': result['tasks'],
                     'total_count': result['total_count'],
                     'limit': limit,
                     'offset': offset
@@ -175,7 +169,7 @@ class AnalysisTaskHandler(BaseViewSetMixin):
 
     def retry_task(self, analysis_id):
         """重试失败的任务"""
-        result = self.task_manager.retry_task(analysis_id, self.request.user)
+        result = self.task_service.retry_task(analysis_id, self.request.user)
 
         if result['success']:
             # 序列化返回数据
@@ -193,7 +187,7 @@ class AnalysisTaskHandler(BaseViewSetMixin):
 
     def cancel_task(self, analysis_id):
         """取消正在进行的任务"""
-        result = self.task_manager.cancel_task(analysis_id, self.request.user)
+        result = self.task_service.cancel_task(analysis_id, self.request.user)
 
         if result['success']:
             # 序列化返回数据

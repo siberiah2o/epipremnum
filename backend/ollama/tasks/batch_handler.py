@@ -9,28 +9,28 @@ from typing import Dict, Any, List, Tuple
 from django.db import transaction
 from django.utils import timezone
 from django_async_manager import get_background_task
-from .atomic_state_manager import atomic_state_manager
+from .state_manager import state_manager
 
 logger = logging.getLogger(__name__)
 background_task = get_background_task()
 
 
-class BatchProcessingError(Exception):
+class BatchError(Exception):
     """批量处理错误基类"""
     pass
 
 
-class BatchValidationError(BatchProcessingError):
+class BatchValidationError(BatchError):
     """批量处理验证错误"""
     pass
 
 
-class BatchExecutionError(BatchProcessingError):
+class BatchExecutionError(BatchError):
     """批量处理执行错误"""
     pass
 
 
-class BatchProcessor:
+class BatchHandler:
     """批量处理器"""
 
     def __init__(self):
@@ -39,8 +39,8 @@ class BatchProcessor:
         self.max_concurrent_per_user = 5
         self.task_timeout = 300  # 5分钟
 
-    def validate_batch_request(self, media_ids: List[int], model_name: str = None,
-                              analysis_options: Dict[str, Any] = None) -> Dict[str, Any]:
+    def validate_request(self, media_ids: List[int], model_name: str = None,
+                       analysis_options: Dict[str, Any] = None) -> Dict[str, Any]:
         """验证批量请求参数"""
         errors = []
         warnings = []
@@ -93,8 +93,8 @@ class BatchProcessor:
         return errors
 
     @transaction.atomic
-    def prepare_batch_tasks(self, user, media_ids: List[int], model_name: str = None,
-                          analysis_options: Dict[str, Any] = None) -> Tuple[List, List, Dict[str, Any]]:
+    def prepare_tasks(self, user, media_ids: List[int], model_name: str = None,
+                     analysis_options: Dict[str, Any] = None) -> Tuple[List, List, Dict[str, Any]]:
         """准备批量任务（原子性操作）"""
         from media.models import Media
         from ..models import OllamaAIModel, OllamaImageAnalysis
@@ -182,7 +182,7 @@ class BatchProcessor:
 
         return model
 
-    def execute_batch_processing(self, user, valid_tasks: List, analysis_options: Dict[str, Any]) -> Dict[str, Any]:
+    def execute_processing(self, user, valid_tasks: List, analysis_options: Dict[str, Any]) -> Dict[str, Any]:
         """执行批量处理"""
         try:
             if not valid_tasks:
@@ -195,11 +195,11 @@ class BatchProcessor:
             # 创建 media_id 到 analysis_id 的映射
             media_to_analysis = {task.media.id: task.id for task in valid_tasks}
 
-            # 导入并发控制器
-            from .concurrency_controller import concurrency_controller
+            # 导入并发管理器
+            from .concurrency_manager import concurrency_manager
 
             # 准备执行器回调
-            from .image_analyzer import OllamaImageAnalyzer
+            from .ollama_client import OllamaImageAnalyzer
             analyzer = OllamaImageAnalyzer()
 
             def executor_callback(analysis_obj, prompt_text):
@@ -209,7 +209,7 @@ class BatchProcessor:
             logger.info(f"🚀 开始执行批量处理: {len(media_ids)} 个文件，用户: {user.id}")
             start_time = time.time()
 
-            batch_result = concurrency_controller.process_batch_images(
+            batch_result = concurrency_manager.process_batch_images(
                 user_id=user.id,
                 media_ids=media_ids,
                 model_name=model_name,
@@ -253,12 +253,12 @@ class BatchProcessor:
             logger.error(f"❌ 批量处理执行失败: {str(e)}")
             raise BatchExecutionError(f"批量处理执行失败: {str(e)}")
 
-    def handle_batch_failure(self, valid_tasks: List, error: Exception):
+    def handle_failure(self, valid_tasks: List, error: Exception):
         """处理批量失败情况"""
         try:
             # 取消所有已提交的任务
             analysis_ids = [task.id for task in valid_tasks]
-            cancelled_result = atomic_state_manager.batch_update_status(
+            cancelled_result = state_manager.batch_update_status(
                 analysis_ids=analysis_ids,
                 from_status=['pending', 'processing'],
                 to_status='failed',
@@ -273,10 +273,10 @@ class BatchProcessor:
             logger.error(f"❌ 批量失败清理操作失败: {str(cleanup_error)}")
             return {'success_count': 0, 'error_count': len(valid_tasks)}
 
-    def _start_async_batch_processing(self, user, valid_tasks: List, analysis_options: Dict[str, Any]) -> None:
+    def _start_async_processing(self, user, valid_tasks: List, analysis_options: Dict[str, Any]) -> None:
         """启动基于并发控制的异步批量处理 - 所有任务都在worker中并发运行"""
         try:
-            from .concurrency_controller import concurrency_controller
+            from .concurrency_manager import concurrency_manager
 
             logger.info(f"🚀 启动基于并发控制的批量处理: {len(valid_tasks)} 个任务")
 
@@ -292,11 +292,11 @@ class BatchProcessor:
                     'analysis': analysis
                 })
 
-            # 使用并发控制器执行批量处理
+            # 使用并发管理器执行批量处理
             def task_executor(analysis_obj):
                 """单个任务的执行函数 - 直接执行图片分析，不创建异步任务"""
                 try:
-                    from .image_analyzer import OllamaImageAnalyzer
+                    from .ollama_client import OllamaImageAnalyzer
 
                     logger.info(f"🔄 开始并发图片分析: analysis_id={analysis_obj.id}")
 
@@ -362,7 +362,7 @@ class BatchProcessor:
                         'media_id': analysis_obj.media.id
                     }
 
-            # 通过并发控制器提交所有任务
+            # 通过并发管理器提交所有任务
             # 添加数据库连接检查和错误处理
             try:
                 futures = []
@@ -372,10 +372,10 @@ class BatchProcessor:
                     try:
                         # 确保数据库连接可用
                         from django.db import connection
-                        if connection.connection and connection.connection.closed:
-                            connection.connection = None
+                        if not connection.is_usable():
+                            connection.close()
 
-                        future = concurrency_controller.submit_task(
+                        future = concurrency_manager.submit_task(
                             user_id=user.id,
                             task_func=task_executor,
                             analysis_obj=task_info['analysis']
@@ -394,12 +394,12 @@ class BatchProcessor:
                         except:
                             pass
 
-                logger.info(f"🎯 并发批量处理启动: 成功提交 {submitted_count}/{len(task_data)} 个任务到并发控制器")
+                logger.info(f"🎯 并发批量处理启动: 成功提交 {submitted_count}/{len(task_data)} 个任务到并发管理器")
 
                 # 如果没有任何任务被成功提交，处理剩余任务
                 if submitted_count == 0:
-                    logger.error("❌ 没有任务能够被成功提交到并发控制器")
-                    self.handle_batch_failure(valid_tasks, "并发控制器无法接受任何任务")
+                    logger.error("❌ 没有任务能够被成功提交到并发管理器")
+                    self.handle_failure(valid_tasks, "并发管理器无法接受任何任务")
 
             except Exception as e:
                 logger.error(f"❌ 并发批量处理启动失败: {str(e)}")
@@ -413,15 +413,15 @@ class BatchProcessor:
                 self._fallback_to_direct_async_tasks(user, valid_tasks)
             except Exception as fallback_error:
                 logger.error(f"❌ 回退处理也失败: {str(fallback_error)}")
-                self.handle_batch_failure(valid_tasks, fallback_error)
+                self.handle_failure(valid_tasks, fallback_error)
 
     def _fallback_to_direct_async_tasks(self, user, valid_tasks: List) -> None:
-        """回退到直接异步任务模式（不经过并发控制器）"""
-        from .async_tasks import analyze_image_with_ollama_task
+        """回退到直接异步任务模式（不经过并发管理器）"""
+        from .task_workers import analyze_image_task
 
         for analysis in valid_tasks:
             try:
-                task = analyze_image_with_ollama_task.run_async(analysis_id=analysis.id)
+                task = analyze_image_task.run_async(analysis_id=analysis.id)
                 analysis.task_id = task.id
                 analysis.save(update_fields=['task_id'])
 
@@ -432,8 +432,8 @@ class BatchProcessor:
                 analysis.mark_as_failed(f'任务创建失败: {str(e)}')
 
     def analyze_images_with_concurrency_task(self, user_id: int, media_ids: List[int],
-                                             model_name: str, analysis_options: Dict[str, Any] = None,
-                                             prompt: str = None) -> Dict[str, Any]:
+                                           model_name: str, analysis_options: Dict[str, Any] = None,
+                                           prompt: str = None) -> Dict[str, Any]:
         """
         图片并发批量分析任务
         提供更好的错误处理和恢复机制
@@ -448,10 +448,10 @@ class BatchProcessor:
             user = User.objects.get(id=user_id)
 
             # 创建批量处理器实例
-            processor = BatchProcessor()
+            handler = BatchHandler()
 
             # 验证批量请求
-            validation_result = processor.validate_batch_request(media_ids, model_name, analysis_options)
+            validation_result = handler.validate_request(media_ids, model_name, analysis_options)
             if not validation_result['valid']:
                 return {
                     'success': False,
@@ -460,7 +460,7 @@ class BatchProcessor:
                 }
 
             # 准备批量任务（原子性操作）
-            valid_tasks, validation_errors, summary = processor.prepare_batch_tasks(
+            valid_tasks, validation_errors, summary = handler.prepare_tasks(
                 user=user,
                 media_ids=media_ids,
                 model_name=model_name,
@@ -476,33 +476,52 @@ class BatchProcessor:
                     'summary': summary
                 }
 
-            # 🔥 关键修复：立即启动异步处理，不等待结果
+            # 修正：使用真正的批量并发处理，而不是分别启动多个独立任务
             try:
                 # 创建 media_id 到 analysis_id 的映射
                 media_to_analysis = {task.media.id: task.id for task in valid_tasks}
+                analysis_ids = [task.id for task in valid_tasks]
 
-                # 立即启动并发批量处理（在后台异步执行）
-                processor._start_async_batch_processing(user, valid_tasks, analysis_options)
+                # 获取并发控制参数
+                max_concurrent = analysis_options.get('max_concurrent', self.default_concurrent) if analysis_options else self.default_concurrent
+
+                logger.info(f"🚀 启动批量并发分析任务: {len(valid_tasks)} 张图片，图片级并发限制: {max_concurrent}")
+                logger.info(f"📝 说明：每张图片内部的4个分析项目将串行执行（标题、描述、分类、标签）")
+
+                # 使用批量分析任务，实现真正的图片级并发
+                from .task_workers import analyze_batch_task
+
+                batch_task = analyze_batch_task.run_async(
+                    user_id=user_id,
+                    analysis_ids=analysis_ids,
+                    model_name=model_name,
+                    max_concurrent=max_concurrent
+                )
+
+                logger.info(f"✅ 批量并发分析任务已启动: task_id={batch_task.id}")
 
                 # 立即返回任务启动信息，不等待处理完成
                 response = {
                     'success': True,
                     'batch_started': True,
+                    'batch_task_id': str(batch_task.id),
                     'summary': summary,
-                    'analysis_ids': list(media_to_analysis.values()),
+                    'analysis_ids': analysis_ids,
                     'media_analysis_mapping': media_to_analysis,
+                    'max_concurrent': max_concurrent,
+                    'concurrency_mode': 'image_level_concurrent',  # 图片级并发，图片内串行
                     'validation_errors': validation_errors if validation_errors else None,
                     'warnings': validation_result.get('warnings', []),
-                    'message': '批量分析任务已启动，正在后台异步处理'
+                    'message': f'批量并发分析任务已启动，图片级并发限制: {max_concurrent}，每张图片内4个分析项目串行执行'
                 }
 
-                logger.info(f"🚀 批量分析任务已启动: {summary['total_requested']} 个文件，{len(valid_tasks)} 个有效任务")
+                logger.info(f"🚀 批量并发分析任务已启动: {summary['total_requested']} 个文件，{len(valid_tasks)} 个有效任务，并发限制: {max_concurrent}")
                 return response
 
             except Exception as e:
                 # 处理任务启动错误
                 logger.error(f"❌ 批量任务启动失败: {str(e)}")
-                processor.handle_batch_failure(valid_tasks, e)
+                handler.handle_failure(valid_tasks, e)
 
                 return {
                     'success': False,
@@ -518,7 +537,7 @@ class BatchProcessor:
             # 尝试清理资源
             try:
                 if 'valid_tasks' in locals():
-                    processor.handle_batch_failure(valid_tasks, e)
+                    handler.handle_failure(valid_tasks, e)
             except:
                 pass
 
@@ -529,11 +548,11 @@ class BatchProcessor:
                 'user_id': user_id
             }
 
-    def get_batch_status_summary(self, user) -> Dict[str, Any]:
+    def get_status_summary(self, user) -> Dict[str, Any]:
         """获取批量状态摘要"""
         try:
-            # 使用原子状态管理器获取统计信息
-            user_stats = atomic_state_manager.get_user_task_statistics(user.id)
+            # 使用状态管理器获取统计信息
+            user_stats = state_manager.get_user_task_statistics(user.id)
 
             # 添加批量特定信息
             from django_async_manager.models import Task
@@ -559,32 +578,4 @@ class BatchProcessor:
 
 
 # 全局批量处理器实例
-batch_processor = BatchProcessor()
-
-
-# Django异步任务管理器兼容性包装器（必需）
-@background_task(max_retries=2, retry_delay=60)
-def analyze_images_with_concurrency_task(user_id: int, media_ids: List[int],
-                                       model_name: str, analysis_options: Dict[str, Any] = None,
-                                       prompt: str = None) -> Dict[str, Any]:
-    """
-    Django异步任务管理器兼容性包装器
-
-    由于Django异步任务系统只能调用模块级函数，无法调用类方法，
-    因此需要这个包装器函数来桥接到批量处理器实例。
-
-    Args:
-        user_id: 用户ID
-        media_ids: 媒体ID列表
-        model_name: 模型名称
-        analysis_options: 分析选项
-        prompt: 自定义提示词
-
-    Returns:
-        Dict[str, Any]: 任务执行结果
-    """
-    # 创建新的批量处理器实例，避免序列化问题
-    processor = BatchProcessor()
-    return processor.analyze_images_with_concurrency_task(
-        user_id, media_ids, model_name, analysis_options, prompt
-    )
+batch_handler = BatchHandler()

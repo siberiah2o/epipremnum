@@ -6,7 +6,7 @@
 import logging
 from django.db.models import Q
 from .base import BaseResponseHandler, BaseViewSetMixin
-from ..tasks.concurrency_controller import concurrency_controller
+from ..tasks.concurrency_manager import concurrency_manager
 
 logger = logging.getLogger(__name__)
 

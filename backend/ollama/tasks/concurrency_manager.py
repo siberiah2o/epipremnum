@@ -1,5 +1,5 @@
 """
-改进的并发分析控制器
+改进的并发分析管理器
 解决原有线程控制不稳定、状态控制不稳定等问题
 """
 
@@ -10,13 +10,13 @@ from typing import Dict, Any, List, Tuple, Optional
 from concurrent.futures import ThreadPoolExecutor, Future, as_completed
 from django.conf import settings
 from django.core.cache import cache
-from .cancellable_task import task_manager, TaskCancelledException
+from .task_cancellation import cancellation_manager, TaskCancelledException
 
 logger = logging.getLogger(__name__)
 
 
-class ConcurrencyController:
-    """并发分析控制器"""
+class ConcurrencyManager:
+    """并发分析管理器"""
 
     def __init__(self):
         # 每个用户的独立线程池执行器
@@ -202,7 +202,7 @@ class ConcurrencyController:
             self.active_futures.pop(future, None)
 
         # 通过任务管理器取消可取消任务
-        task_cancelled_count = task_manager.cancel_user_tasks(user_id)
+        task_cancelled_count = cancellation_manager.cancel_user_tasks(user_id)
 
         total_cancelled = cancelled_count + task_cancelled_count
 
@@ -295,7 +295,7 @@ class ConcurrencyController:
     def _execute_single_task(self, task_name: str, task_prompt: str, analysis, executor_callback) -> Dict[str, Any]:
         """执行单个任务（支持取消）"""
         # 创建可取消任务
-        cancellable_task = task_manager.create_task(
+        cancellable_task = cancellation_manager.create_task(
             f"{task_name}_{analysis.id}_{int(time.time())}",
             analysis.media.user.id
         )
@@ -328,7 +328,7 @@ class ConcurrencyController:
 
             if api_result['success']:
                 # 处理结果
-                from .image_analyzer import OllamaImageAnalyzer
+                from .ollama_client import OllamaImageAnalyzer
                 analyzer = OllamaImageAnalyzer()
 
                 response_dict = api_result['response']
@@ -356,7 +356,7 @@ class ConcurrencyController:
             return {'success': False, 'error': error_msg}
         finally:
             # 清理任务
-            task_manager.remove_task(cancellable_task.task_id)
+            cancellation_manager.remove_task(cancellable_task.task_id)
 
     def _call_api_with_timeout(self, endpoint_url: str, model_name: str, data: Dict, cancellable_task) -> Dict:
         """调用API（带取消检查）"""
@@ -476,15 +476,15 @@ class ConcurrencyController:
                 self.active_futures.pop(future, None)
 
             # 清理任务管理器中的已完成任务
-            task_manager.cleanup_completed_tasks()
+            cancellation_manager.cleanup_completed_tasks()
 
         if users_to_remove or completed_futures:
             logger.info(f"🧹 清理完成: 移除 {len(users_to_remove)} 个用户执行器, "
                        f"清理 {len(completed_futures)} 个已完成的任务")
 
     def shutdown(self):
-        """关闭控制器"""
-        logger.info("🛑 正在关闭并发控制器...")
+        """关闭管理器"""
+        logger.info("🛑 正在关闭并发管理器...")
 
         self._shutdown_event.set()
 
@@ -501,7 +501,7 @@ class ConcurrencyController:
             self.user_semaphores.clear()
             self.active_futures.clear()
 
-        logger.info("✅ 并发控制器已关闭")
+        logger.info("✅ 并发管理器已关闭")
 
     def process_batch_images(
         self,
@@ -514,13 +514,18 @@ class ConcurrencyController:
         """
         批量处理图片（改进版）
         使用稳定的线程池管理和真正的取消机制
+
+        重要说明：
+        - 多张图片之间可以并发处理（受max_concurrent控制）
+        - 每张图片内部的4个分析项目（标题、描述、分类、标签）强制串行执行，避免API冲突
         """
         from ..models import OllamaImageAnalysis
-        from .image_analyzer import OllamaImageAnalyzer
-        from .analysis_templates import TaskTypeConfig
+        from .ollama_client import OllamaImageAnalyzer
+        from .prompt_templates import TaskConfig
 
         max_concurrent = analysis_options.get('max_concurrent', self.default_concurrent)
-        logger.info(f"🚀 开始改进版批量处理 {len(media_ids)} 个图片，用户 {user_id} 并发限制: {max_concurrent}")
+        logger.info(f"🚀 开始批量处理 {len(media_ids)} 个图片，用户 {user_id} 图片级并发限制: {max_concurrent}")
+        logger.info(f"📝 说明：每张图片内部的4个分析项目将串行执行（标题、描述、分类、标签）")
         
         # 记录当前活跃任务信息
         active_info = self.get_active_tasks_info()
@@ -565,15 +570,15 @@ class ConcurrencyController:
                     result = future.result(timeout=timeout)
 
                     if result['success']:
-                        # 🔥 修复：使用原子状态管理器更新状态
-                        from .atomic_state_manager import atomic_state_manager
+                        # 修复：使用状态管理器更新状态
+                        from .state_manager import state_manager
                         analysis = next(a for a in analyses if a.media.id == media_id)
                         
                         # 准备结果数据
                         result_data = result.get('result', {})
                         
                         # 原子性更新媒体信息
-                        media_update_success = atomic_state_manager.update_media_with_analysis_result(
+                        media_update_success = state_manager.update_media_with_analysis_result(
                             analysis, result_data
                         )
                         
@@ -587,8 +592,8 @@ class ConcurrencyController:
                         if processing_time_ms is None:
                             processing_time_ms = 0
                             
-                        # 使用原子状态管理器更新任务状态为完成
-                        task_update_success = atomic_state_manager.update_analysis_status(
+                        # 使用状态管理器更新任务状态为完成
+                        task_update_success = state_manager.update_analysis_status(
                             analysis_id=analysis.id,
                             from_status='processing',
                             to_status='completed',
@@ -630,12 +635,12 @@ class ConcurrencyController:
                             'media_id': media_id,
                             'error': result.get('error', '未知错误')
                         })
-                        # 🔥 修复：使用原子状态管理器标记失败
-                        from .atomic_state_manager import atomic_state_manager
+                        # 修复：使用状态管理器标记失败
+                        from .state_manager import state_manager
                         analysis = next(a for a in analyses if a.media.id == media_id)
                         
-                        # 使用原子状态管理器更新任务状态为失败
-                        task_update_success = atomic_state_manager.update_analysis_status(
+                        # 使用状态管理器更新任务状态为失败
+                        task_update_success = state_manager.update_analysis_status(
                             analysis_id=analysis.id,
                             from_status=None,  # 允许从任何状态转换为失败
                             to_status='failed',
@@ -659,13 +664,13 @@ class ConcurrencyController:
                         'media_id': media_id,
                         'error': f"图片处理异常: {str(e)}"
                     })
-                    # 🔥 修复：使用原子状态管理器标记失败
+                    # 修复：使用状态管理器标记失败
                     try:
-                        from .atomic_state_manager import atomic_state_manager
+                        from .state_manager import state_manager
                         analysis = next(a for a in analyses if a.media.id == media_id)
                         
-                        # 使用原子状态管理器更新任务状态为失败
-                        atomic_state_manager.update_analysis_status(
+                        # 使用状态管理器更新任务状态为失败
+                        state_manager.update_analysis_status(
                             analysis_id=analysis.id,
                             from_status=None,  # 允许从任何状态转换为失败
                             to_status='failed',
@@ -696,14 +701,14 @@ class ConcurrencyController:
         处理单张图片的所有分析任务（支持取消）
         使用可取消任务框架
         """
-        from .analysis_templates import TaskTypeConfig
-        from .image_analyzer import OllamaImageAnalyzer
-        from .cancellable_task import TaskCancelledException
+        from .prompt_templates import TaskConfig
+        from .ollama_client import OllamaImageAnalyzer
+        from .task_cancellation import TaskCancelledException
 
         start_time = time.time()
 
         # 创建可取消任务
-        cancellable_task = task_manager.create_task(
+        cancellable_task = cancellation_manager.create_task(
             f"batch_image_{analysis.media.id}_{int(time.time())}",
             analysis.media.user.id
         )
@@ -711,7 +716,7 @@ class ConcurrencyController:
         try:
             cancellable_task.start()
 
-            # 🔥 关键修复：在开始处理前检查任务是否已被取消
+            # 关键修复：在开始处理前检查任务是否已被取消
             if analysis.status == 'cancelled':
                 logger.info(f"🚫 任务已被取消，跳过处理: analysis_id={analysis.id}")
                 return {
@@ -724,9 +729,9 @@ class ConcurrencyController:
                     'cancelled': True
                 }
 
-            # 🔥 关键修复：使用原子状态管理器安全地标记任务为处理中状态
-            from .atomic_state_manager import atomic_state_manager
-            status_update_success = atomic_state_manager.update_analysis_status(
+            # 关键修复：使用状态管理器安全地标记任务为处理中状态
+            from .state_manager import state_manager
+            status_update_success = state_manager.update_analysis_status(
                 analysis_id=analysis.id,
                 from_status='pending',
                 to_status='processing'
@@ -765,7 +770,7 @@ class ConcurrencyController:
             # 检查取消状态
             cancellable_task.check_cancelled()
 
-            # 🔥 修复：使用真正的Ollama分析器而不是手动执行任务
+            # 修复：使用真正的Ollama分析器而不是手动执行任务
             analyzer = OllamaImageAnalyzer()
             
             # 执行真正的图片分析（支持取消）
@@ -777,9 +782,9 @@ class ConcurrencyController:
             if not result['success']:
                 error_msg = result.get('error', '分析失败')
                 logger.error(f"❌ Ollama分析失败: {error_msg}")
-                # 🔥 修复：使用原子状态管理器标记失败
-                from .atomic_state_manager import atomic_state_manager
-                atomic_state_manager.update_analysis_status(
+                # 修复：使用状态管理器标记失败
+                from .state_manager import state_manager
+                state_manager.update_analysis_status(
                     analysis_id=analysis.id,
                     from_status='processing',
                     to_status='failed',
@@ -798,7 +803,7 @@ class ConcurrencyController:
             results = result.get('result', {})
             failed_tasks = result.get('failed_tasks', [])
             
-            # 🔥 修复：确保failed_tasks不为None
+            # 修复：确保failed_tasks不为None
             if failed_tasks is None:
                 failed_tasks = []
 
@@ -822,9 +827,9 @@ class ConcurrencyController:
 
         except TaskCancelledException:
             logger.info(f"🚫 图片 {analysis.media.id} 处理被取消")
-            # 🔥 修复：使用原子状态管理器标记取消
-            from .atomic_state_manager import atomic_state_manager
-            atomic_state_manager.update_analysis_status(
+            # 修复：使用状态管理器标记取消
+            from .state_manager import state_manager
+            state_manager.update_analysis_status(
                 analysis_id=analysis.id,
                 from_status=None,  # 允许从任何状态转换为取消
                 to_status='cancelled',
@@ -841,10 +846,10 @@ class ConcurrencyController:
             }
         except Exception as e:
             logger.error(f"❌ 图片 {analysis.media.id} 处理异常: {str(e)}")
-            # 🔥 修复：使用原子状态管理器标记失败
+            # 修复：使用状态管理器标记失败
             try:
-                from .atomic_state_manager import atomic_state_manager
-                atomic_state_manager.update_analysis_status(
+                from .state_manager import state_manager
+                state_manager.update_analysis_status(
                     analysis_id=analysis.id,
                     from_status=None,  # 允许从任何状态转换为失败
                     to_status='failed',
@@ -863,7 +868,7 @@ class ConcurrencyController:
             }
         finally:
             # 清理任务
-            task_manager.remove_task(cancellable_task.task_id)
+            cancellation_manager.remove_task(cancellable_task.task_id)
 
     def __del__(self):
         """析构函数"""
@@ -873,5 +878,5 @@ class ConcurrencyController:
             pass
 
 
-# 全局并发控制器实例
-concurrency_controller = ConcurrencyController()
+# 全局并发管理器实例
+concurrency_manager = ConcurrencyManager()

@@ -15,11 +15,11 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 
-class AtomicStateManager:
+class StateManager:
     """原子状态管理器"""
 
     def __init__(self):
-        self.cache_timeout = 300  # 5分钟缓存超时
+        self.cache_timeout = 30  # 30秒缓存超时，提高实时性
         self.max_retries = 3  # 最大重试次数
         self.base_delay = 0.1  # 基础延迟时间（秒）
 
@@ -87,7 +87,7 @@ class AtomicStateManager:
                 # 使用 select_for_update 锁定记录避免死锁
                 analysis = OllamaImageAnalysis.objects.select_for_update(skip_locked=False).get(id=analysis_id)
 
-                # 🔥 优化：增强状态检查逻辑
+                # 增强状态检查逻辑
                 current_status = analysis.status
                 
                 # 如果指定了源状态，检查当前状态是否匹配
@@ -103,7 +103,7 @@ class AtomicStateManager:
                                          f"current={current_status}, expected={from_status}")
                             return False
 
-                # 🔥 优化：更严格的状态转换验证
+                # 更严格的状态转换验证
                 if not self._is_valid_status_transition(current_status, to_status):
                     # 特殊处理：如果目标状态是cancelled或failed，允许从任何状态转换
                     if to_status not in ['cancelled', 'failed']:
@@ -170,7 +170,7 @@ class AtomicStateManager:
 
         def _do_batch_update():
             with transaction.atomic():
-                # 🔥 优化：先获取当前状态，用于日志记录
+                # 优化：先获取当前状态，用于日志记录
                 current_statuses = dict(
                     OllamaImageAnalysis.objects.filter(id__in=analysis_ids)
                     .values_list('id', 'status')
@@ -185,7 +185,7 @@ class AtomicStateManager:
                     elif isinstance(from_status, list):
                         queryset = queryset.filter(status__in=from_status)
 
-                # 🔥 优化：更灵活的状态转换逻辑
+                # 更灵活的状态转换逻辑
                 if to_status == 'cancelled':
                     # 允许从 pending 或 processing 状态取消
                     if not from_status:  # 如果没有指定源状态，则过滤
@@ -217,7 +217,7 @@ class AtomicStateManager:
                 # 执行批量更新
                 updated_count = queryset.update(**update_data)
 
-                # 🔥 优化：记录详细的状态转换信息
+                # 优化：记录详细的状态转换信息
                 if updated_count < len(analysis_ids):
                     # 找出未更新的记录 - 修复：应该检查哪些记录实际被更新了
                     actually_updated_ids = set(
@@ -259,7 +259,7 @@ class AtomicStateManager:
             'cancelled': []  # 已取消不能转换
         }
 
-        # 🔥 优化：允许特殊情况下的状态转换
+        # 优化：允许特殊情况下的状态转换
         # 如果目标状态是cancelled或failed，允许从任何状态转换（用于强制取消或标记失败）
         if to_status in ['cancelled', 'failed']:
             return True
@@ -373,13 +373,7 @@ class AtomicStateManager:
             return False
 
     def get_user_task_statistics(self, user_id: int) -> Dict[str, Any]:
-        """获取用户任务统计（带缓存）"""
-        cache_key = f'user_task_stats_{user_id}'
-        cached_stats = cache.get(cache_key)
-
-        if cached_stats:
-            return cached_stats
-
+        """获取用户任务统计（实时数据）"""
         try:
             from ..models import OllamaImageAnalysis
 
@@ -410,9 +404,6 @@ class AtomicStateManager:
             # 添加其他统计信息
             result['processing_time_avg'] = self._get_avg_processing_time(user_id)
             result['last_activity'] = self._get_last_activity_time(user_id)
-
-            # 缓存结果
-            cache.set(cache_key, result, self.cache_timeout)
 
             return result
 
@@ -484,4 +475,4 @@ class AtomicStateManager:
 
 
 # 全局状态管理器实例
-atomic_state_manager = AtomicStateManager()
+state_manager = StateManager()

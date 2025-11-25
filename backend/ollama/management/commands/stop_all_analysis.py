@@ -89,11 +89,11 @@ class Command(BaseCommand):
 
             # 停止所有相关后台任务
             # 注意：现在使用新的批量处理器架构，通过用户ID来管理任务
-            from ollama.tasks.batch_processor import batch_processor
+            from ollama.tasks.batch_handler import batch_handler
 
             # 获取所有活跃用户的任务信息
             try:
-                active_info = batch_processor.get_global_batch_status()
+                active_info = batch_handler.get_global_batch_status()
                 active_user_ids = set(active_info['user_task_stats'].keys())
 
                 # AsyncTask模型也没有user_id字段，通过任务名称过滤
@@ -192,15 +192,15 @@ class Command(BaseCommand):
     def _clean_concurrency_controller(self):
         """清理并发控制器状态"""
         try:
-            from ollama.tasks.concurrency_controller import concurrency_controller
+            from ollama.tasks.concurrency_manager import concurrency_manager
 
             # 清理所有状态
-            if hasattr(concurrency_controller, 'active_threads'):
-                concurrency_controller.active_threads.clear()
-            if hasattr(concurrency_controller, 'user_semaphores'):
-                concurrency_controller.user_semaphores.clear()
-            if hasattr(concurrency_controller, '_cancel_flags'):
-                concurrency_controller._cancel_flags.clear()
+            if hasattr(concurrency_manager, 'active_threads'):
+                concurrency_manager.active_threads.clear()
+            if hasattr(concurrency_manager, 'user_semaphores'):
+                concurrency_manager.user_semaphores.clear()
+            if hasattr(concurrency_manager, '_cancel_flags'):
+                concurrency_manager._cancel_flags.clear()
 
             self.stdout.write('  ✅ 已清理并发控制器状态')
 

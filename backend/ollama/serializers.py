@@ -241,7 +241,14 @@ class OllamaImageAnalysisTaskStatusSerializer(serializers.Serializer):
     retry_count = serializers.IntegerField(read_only=True)
     can_retry = serializers.BooleanField(read_only=True)
     error_message = serializers.CharField(read_only=True, allow_null=True)
-    async_task_status = serializers.CharField(read_only=True, allow_null=True)
+
+    def get_processing_time_s(self, obj):
+        """获取处理时间（秒）"""
+        processing_time_ms = obj.processing_time
+        if processing_time_ms is not None:
+            # 将毫秒转换为秒，保留2位小数
+            return round(processing_time_ms / 1000, 2)
+        return None
 
 
 class OllamaImageAnalysisTaskListSerializer(serializers.Serializer):

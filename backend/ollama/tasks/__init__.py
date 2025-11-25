@@ -1,29 +1,39 @@
 """
-Ollama Tasks Package
-
-This package contains task-related components for Ollama image analysis:
-- manager.py: Task management and coordination
-- image_analyzer.py: Image analysis logic
-- async_tasks.py: Asynchronous task definitions
-- concurrency_controller.py: Concurrency control for batch processing
-- analysis_templates.py: Analysis prompt templates
+Ollama图片分析任务模块
+重构后的模块结构，提供更清晰的代码组织
 """
 
-from .manager import OllamaTaskManager
-from .image_analyzer import OllamaImageAnalyzer
-from .async_tasks import analyze_image_with_ollama_task, cancel_analysis_task, analyze_batch_images_task, cancel_batch_tasks_task, cancel_all_user_tasks_task
-from .concurrency_controller import concurrency_controller
-from .batch_processor import batch_processor, analyze_images_with_concurrency_task
+# 导入核心类和实例
+from .prompt_templates import PromptTemplates, TaskConfig
+from .task_workers import analyze_image_task, cancel_analysis_task, analyze_batch_task, cancel_batch_tasks_task, cancel_all_user_tasks_task
+from .state_manager import state_manager
+from .batch_handler import batch_handler
+from .task_cancellation import cancellation_manager, TaskCancelledException, CancellableTask
+from .concurrency_manager import concurrency_manager
+from .ollama_client import OllamaImageAnalyzer
+from .task_service import task_service
 
+
+# 导出的公共接口
 __all__ = [
-    'OllamaTaskManager',
-    'OllamaImageAnalyzer',
-    'concurrency_controller',
-    'batch_processor',
-    'analyze_images_with_concurrency_task',
-    'analyze_image_with_ollama_task',
+    # 核心类和实例
+    'PromptTemplates',
+    'TaskConfig',
+    'analyze_image_task',
     'cancel_analysis_task',
-    'analyze_batch_images_task',
+    'analyze_batch_task',
     'cancel_batch_tasks_task',
-    'cancel_all_user_tasks_task'
+    'cancel_all_user_tasks_task',
+    'state_manager',
+    'batch_handler',
+    'analyze_images_with_concurrency_task',
+    'cancellation_manager',
+    'TaskCancelledException',
+    'CancellableTask',
+    'concurrency_manager',
+    'OllamaImageAnalyzer',
+    'task_service',
 ]
+
+# 版本信息
+__version__ = '2.0.0'

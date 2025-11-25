@@ -1,5 +1,5 @@
 """
-Ollama图片分析异步任务
+Ollama图片分析异步任务工作者
 重新设计的简化版本，专注于批量分析功能
 """
 import logging
@@ -16,25 +16,30 @@ background_task = get_background_task()
 
 
 @background_task(max_retries=3, retry_delay=60)
-def analyze_image_with_ollama_task(analysis_id: int) -> dict:
+def analyze_image_task(analysis_id: int) -> dict:
     """单个图片分析任务"""
     logger.info(f"🚀 开始图片分析: analysis_id={analysis_id}")
 
     try:
         from ..models import OllamaImageAnalysis
-        from .image_analyzer import OllamaImageAnalyzer
+        from .ollama_client import OllamaImageAnalyzer
 
         # 获取分析任务
         analysis = OllamaImageAnalysis.objects.select_related('media', 'model').get(id=analysis_id)
-        
-        # 使用原子状态管理器更新状态为处理中
-        from .atomic_state_manager import atomic_state_manager
-        success = atomic_state_manager.update_analysis_status(
+
+        # 检查任务状态，如果是失败或取消状态，直接跳过
+        if analysis.status in ['failed', 'cancelled']:
+            logger.info(f"⏭️ 跳过已{analysis.status}的任务: analysis_id={analysis_id}")
+            return {'success': True, 'skipped': True, 'status': analysis.status, 'message': f'任务已{analysis.status}，跳过处理'}
+
+        # 使用状态管理器更新状态为处理中
+        from .state_manager import state_manager
+        success = state_manager.update_analysis_status(
             analysis_id=analysis_id,
             from_status='pending',
             to_status='processing'
         )
-        
+
         if not success:
             logger.error(f"无法更新分析状态为处理中: analysis_id={analysis_id}")
             return {'success': False, 'error': '状态更新失败，可能任务已被其他进程处理'}
@@ -44,12 +49,12 @@ def analyze_image_with_ollama_task(analysis_id: int) -> dict:
         result = analyzer.analyze(analysis)
 
         if result['success']:
-            # 使用原子状态管理器更新媒体模型字段和任务状态
-            media_update_success = atomic_state_manager.update_media_with_analysis_result(
+            # 使用状态管理器更新媒体模型字段和任务状态
+            media_update_success = state_manager.update_media_with_analysis_result(
                 analysis, result['result']
             )
             
-            task_update_success = atomic_state_manager.update_analysis_status(
+            task_update_success = state_manager.update_analysis_status(
                 analysis_id=analysis_id,
                 from_status='processing',
                 to_status='completed',
@@ -72,8 +77,8 @@ def analyze_image_with_ollama_task(analysis_id: int) -> dict:
                 'processing_time_s': round(result.get('processing_time_ms', 0) / 1000, 2) if result.get('processing_time_ms') else None
             }
         else:
-            # 使用原子状态管理器更新任务状态为失败
-            atomic_state_manager.update_analysis_status(
+            # 使用状态管理器更新任务状态为失败
+            state_manager.update_analysis_status(
                 analysis_id=analysis_id,
                 from_status='processing',
                 to_status='failed',
@@ -89,10 +94,10 @@ def analyze_image_with_ollama_task(analysis_id: int) -> dict:
     except Exception as e:
         logger.error(f"❌ 任务执行异常: analysis_id={analysis_id}, error={str(e)}")
         
-        # 使用原子状态管理器更新任务状态为失败
+        # 使用状态管理器更新任务状态为失败
         try:
-            from .atomic_state_manager import atomic_state_manager
-            atomic_state_manager.update_analysis_status(
+            from .state_manager import state_manager
+            state_manager.update_analysis_status(
                 analysis_id=analysis_id,
                 from_status=None,  # 允许从任何状态转换为失败
                 to_status='failed',
@@ -158,7 +163,7 @@ def cancel_analysis_task(analysis_id: int) -> dict:
 
 
 @background_task(max_retries=2, retry_delay=30)
-def analyze_batch_images_task(user_id, analysis_ids, model_name, max_concurrent=3):
+def analyze_batch_task(user_id, analysis_ids, model_name, max_concurrent=3):
     """
     批量分析图片任务
     支持并发控制，每个图片内部有4个请求（标题、描述、分类、标签）
@@ -189,14 +194,14 @@ def analyze_batch_images_task(user_id, analysis_ids, model_name, max_concurrent=
             logger.error(f"模型不存在: {model_name}")
             raise Exception(f"模型不存在: {model_name}")
 
-        # 🔥 修复：使用并发控制器进行批量处理
-        from .concurrency_controller import concurrency_controller
+        # 使用并发管理器进行批量处理
+        from .concurrency_manager import concurrency_manager
         
         # 准备媒体ID列表
         media_ids = [analysis.media.id for analysis in analyses]
         
-        # 使用并发控制器处理批量图片
-        batch_result = concurrency_controller.process_batch_images(
+        # 使用并发管理器处理批量图片
+        batch_result = concurrency_manager.process_batch_images(
             user_id=user_id,
             media_ids=media_ids,
             model_name=model_name,
@@ -246,10 +251,10 @@ def analyze_batch_images_task(user_id, analysis_ids, model_name, max_concurrent=
     except Exception as e:
         logger.error(f"批量分析任务失败: {str(e)}")
 
-        # 使用原子状态管理器标记所有未完成的分析任务为失败
+        # 使用状态管理器标记所有未完成的分析任务为失败
         try:
-            from .atomic_state_manager import atomic_state_manager
-            atomic_state_manager.batch_update_status(
+            from .state_manager import state_manager
+            state_manager.batch_update_status(
                 analysis_ids=analysis_ids,
                 from_status=['pending', 'processing'],
                 to_status='failed',
@@ -265,14 +270,14 @@ def analyze_single_image(analysis, model):
     """
     分析单个图片
     每个图片内部有4个请求：标题、描述、分类、标签
-    使用原子状态管理器避免数据库锁定
+    使用状态管理器避免数据库锁定
     """
     try:
         logger.debug(f"开始分析图片: media_id={analysis.media.id}")
 
-        # 使用原子状态管理器更新状态为处理中
-        from .atomic_state_manager import atomic_state_manager
-        success = atomic_state_manager.update_analysis_status(
+        # 使用状态管理器更新状态为处理中
+        from .state_manager import state_manager
+        success = state_manager.update_analysis_status(
             analysis_id=analysis.id,
             from_status='pending',
             to_status='processing'
@@ -286,8 +291,8 @@ def analyze_single_image(analysis, model):
                 'error': '状态更新失败，可能任务已被其他进程处理'
             }
 
-        # 🔥 修复：使用真正的Ollama分析器而不是模拟函数
-        from .image_analyzer import OllamaImageAnalyzer
+        # 使用真正的Ollama分析器
+        from .ollama_client import OllamaImageAnalyzer
         analyzer = OllamaImageAnalyzer()
         
         # 执行真正的图片分析
@@ -296,7 +301,7 @@ def analyze_single_image(analysis, model):
         if not result['success']:
             logger.error(f"Ollama分析失败: media_id={analysis.media.id}, error={result['error']}")
             # 更新任务状态为失败
-            atomic_state_manager.update_analysis_status(
+            state_manager.update_analysis_status(
                 analysis_id=analysis.id,
                 from_status='processing',
                 to_status='failed',
@@ -311,7 +316,7 @@ def analyze_single_image(analysis, model):
         # 获取分析结果
         analysis_results = result.get('result', {})
         
-        # 使用原子状态管理器更新媒体信息和任务状态
+        # 使用状态管理器更新媒体信息和任务状态
         # 准备结果数据
         result_data = {}
         if 'title' in analysis_results:
@@ -324,7 +329,7 @@ def analyze_single_image(analysis, model):
             result_data['tags'] = analysis_results['tags']
         
         # 原子性更新媒体信息
-        media_update_success = atomic_state_manager.update_media_with_analysis_result(
+        media_update_success = state_manager.update_media_with_analysis_result(
             analysis, result_data
         )
         
@@ -371,8 +376,8 @@ def analyze_single_image(analysis, model):
         if processing_time_ms is None and analysis.started_at:
             processing_time_ms = int((timezone.now() - analysis.started_at).total_seconds() * 1000)
         
-        # 使用原子状态管理器更新任务状态为完成
-        success = atomic_state_manager.update_analysis_status(
+        # 使用状态管理器更新任务状态为完成
+        success = state_manager.update_analysis_status(
             analysis_id=analysis.id,
             from_status='processing',
             to_status='completed',
@@ -399,8 +404,8 @@ def analyze_single_image(analysis, model):
     except Exception as e:
         logger.error(f"图片分析失败: media_id={analysis.media.id}, error={str(e)}")
 
-        # 使用原子状态管理器更新任务状态为失败
-        from .atomic_state_manager import atomic_state_manager
+        # 使用状态管理器更新任务状态为失败
+        from .state_manager import state_manager
         
         # 计算处理时间
         processing_time_ms = None
@@ -410,7 +415,7 @@ def analyze_single_image(analysis, model):
         except:
             pass
         
-        success = atomic_state_manager.update_analysis_status(
+        success = state_manager.update_analysis_status(
             analysis_id=analysis.id,
             from_status=None,  # 允许从任何状态转换为失败
             to_status='failed',
@@ -598,6 +603,3 @@ def cancel_all_user_tasks_task(user_id):
         logger.error(f"取消所有任务失败: {str(e)}")
         return {'success': False, 'error': f"取消所有任务失败: {str(e)}"}
 
-
-# 注意：这些模拟函数已被真正的Ollama API调用替代
-# 保留此注释以说明代码变更历史
