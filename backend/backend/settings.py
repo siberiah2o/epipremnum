@@ -104,10 +104,10 @@ DATABASES = {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / 'db.sqlite3',
         'OPTIONS': {
-            'timeout': 60,  # 进一步增加到60秒超时
+            'timeout': 120,  # 增加到120秒超时
             'check_same_thread': False,
-            # 更激进的SQLite优化配置
-            'init_command': "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA cache_size=-128000; PRAGMA temp_store=memory; PRAGMA busy_timeout=60000; PRAGMA wal_autocheckpoint=1000; PRAGMA mmap_size=268435456; PRAGMA locking_mode=NORMAL; PRAGMA auto_vacuum=INCREMENTAL; PRAGMA journal_size_limit=67108864;",
+            # 针对并发优化的SQLite配置
+            'init_command': "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA cache_size=-256000; PRAGMA temp_store=memory; PRAGMA busy_timeout=120000; PRAGMA wal_autocheckpoint=100; PRAGMA mmap_size=536870912; PRAGMA locking_mode=NORMAL; PRAGMA auto_vacuum=INCREMENTAL; PRAGMA journal_size_limit=134217728; PRAGMA wal_checkpoint_mode=RESTART;",
         }
     }
 }

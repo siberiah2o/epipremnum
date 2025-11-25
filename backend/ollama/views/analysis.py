@@ -4,6 +4,7 @@
 """
 
 import logging
+from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 from rest_framework.decorators import action
@@ -15,10 +16,7 @@ from ..serializers import (
     OllamaImageAnalysisTaskStatusSerializer,
     OllamaImageAnalysisTaskListSerializer,
     OllamaImageAnalysisTaskRetrySerializer,
-    OllamaImageAnalysisTaskCancelSerializer,
-    BatchStatusQuerySerializer,
-    BatchStatusResponseSerializer,
-    OllamaImageAnalysisBatchTaskSerializer
+    OllamaImageAnalysisTaskCancelSerializer
 )
 from ..tasks.manager import OllamaTaskManager
 from django.utils import timezone
@@ -46,29 +44,83 @@ class AnalysisTaskHandler(BaseViewSetMixin):
                     message=model_validation['error']
                 )
 
-        # 创建分析任务
-        result = self.task_manager.create_task(
-            user=self.request.user,
-            media_id=serializer.validated_data['media_id'],
-            model_name=model_name,
-            analysis_options=serializer.validated_data.get('options', {}),
-            prompt=serializer.validated_data.get('prompt')
-        )
+        # 使用原子状态管理器创建分析任务
+        from ..models import Media, OllamaAIModel
+        from ..tasks.atomic_state_manager import atomic_state_manager
+        from ..tasks.async_tasks import analyze_image_with_ollama_task
 
-        if result['success']:
-            # 序列化返回数据
-            response_serializer = OllamaImageAnalysisTaskCreateSerializer(data=result)
+        try:
+            # 验证媒体文件
+            media = Media.objects.get(
+                id=serializer.validated_data['media_id'],
+                user=self.request.user
+            )
+
+            # 验证模型
+            model = None
+            if model_name:
+                model = OllamaAIModel.objects.get(
+                    name=model_name,
+                    endpoint__created_by=self.request.user,
+                    is_active=True,
+                    is_vision_capable=True
+                )
+            else:
+                # 使用默认模型
+                model = OllamaAIModel.objects.filter(
+                    endpoint__created_by=self.request.user,
+                    is_active=True,
+                    is_vision_capable=True,
+                    is_default=True
+                ).first()
+
+            if not model:
+                return BaseResponseHandler.error_response(
+                    message='没有可用的视觉分析模型'
+                )
+
+            # 使用原子状态管理器创建分析任务
+            analysis, created = atomic_state_manager.create_analysis_safely(
+                media=media,
+                model=model,
+                analysis_options=serializer.validated_data.get('options', {})
+            )
+
+            # 启动异步分析任务
+            task = analyze_image_with_ollama_task.run_async(
+                analysis_id=analysis.id
+            )
+
+            # 构建响应数据
+            response_data = {
+                'analysis_id': analysis.id,
+                'task_id': str(task.id),
+                'media_id': media.id,
+                'media_title': media.title or f"图片_{media.id}",
+                'model_name': model.name,
+                'status': analysis.status,
+                'created_at': analysis.created_at
+            }
+
+            response_serializer = OllamaImageAnalysisTaskCreateSerializer(data=response_data)
             response_serializer.is_valid(raise_exception=True)
 
             return BaseResponseHandler.created_response(
                 message='图片分析任务创建成功',
                 data=response_serializer.data
             )
-        else:
-            # 如果有data字段（如重复任务信息），也一并返回
+
+        except Media.DoesNotExist:
             return BaseResponseHandler.error_response(
-                message=result['error'],
-                data=result.get('data')
+                message='媒体文件不存在或无权访问'
+            )
+        except OllamaAIModel.DoesNotExist:
+            return BaseResponseHandler.error_response(
+                message=f'模型 "{model_name}" 不存在或不支持视觉分析'
+            )
+        except Exception as e:
+            return BaseResponseHandler.error_response(
+                message=f'创建分析任务失败: {str(e)}'
             )
 
     def get_task_status(self, analysis_id):
@@ -186,22 +238,21 @@ class AnalysisTaskHandler(BaseViewSetMixin):
 
 
 class AnalysisBatchHandler(BaseViewSetMixin):
-    """批量分析处理器"""
+    """批量分析处理器 - 简化版本"""
 
     def __init__(self, viewset_instance):
         self.viewset = viewset_instance
         self.request = viewset_instance
-        from ..tasks.image_analyzer import OllamaImageAnalyzer
-        from ..tasks.manager import OllamaTaskManager
-        from ..models import OllamaImageAnalysis
-        self.analyzer = OllamaImageAnalyzer()
-        self.task_manager = OllamaTaskManager()
 
     def batch_create_tasks(self):
-        """批量创建分析任务 - 使用新的并发架构"""
+        """批量创建分析任务 - 简化实现"""
+        from ..models import Media, OllamaAIModel, OllamaImageAnalysis
+        from ..tasks.async_tasks import analyze_batch_images_task
+        from django.conf import settings
+
         media_ids = self.viewset.request.data.get('media_ids', [])
         model_name = self.viewset.request.data.get('model_name')
-        analysis_options = self.viewset.request.data.get('options', {})
+        options = self.viewset.request.data.get('options', {})
 
         # 验证输入参数
         if not isinstance(media_ids, list) or not media_ids:
@@ -209,136 +260,115 @@ class AnalysisBatchHandler(BaseViewSetMixin):
                 message='media_ids 必须是非空数组'
             )
 
-        if len(media_ids) > 20:  # 限制批量大小
+        if len(media_ids) > 50:
             return BaseResponseHandler.error_response(
-                message='单次批量操作最多支持20个文件'
+                message='单次批量操作最多支持50个文件'
             )
 
-        # 验证并发控制参数
-        concurrency_errors = self._validate_concurrency_options(analysis_options)
-        if concurrency_errors:
-            return BaseResponseHandler.error_response(
-                message=f'并发控制参数验证失败: {"; ".join(concurrency_errors)}'
-            )
-
-        # 验证模型（如果有指定）
-        if model_name:
-            model_validation = self._validate_model_for_user(model_name)
-            if not model_validation['valid']:
-                return BaseResponseHandler.error_response(
-                    message=model_validation['error']
-                )
-
-        # 准备媒体信息
-        from media.models import Media
-        media_items = []
-        validation_errors = []
-
-        # 验证并准备媒体信息
-        for media_id in media_ids:
-            try:
-                media = Media.objects.get(id=media_id, user=self.viewset.request.user)
-                media_items.append((media_id, media.title or f"图片_{media_id}"))
-            except Media.DoesNotExist:
-                validation_errors.append({
-                    'media_id': media_id,
-                    'error': '媒体文件不存在或无权访问'
-                })
-
-        if validation_errors:
-            return BaseResponseHandler.error_response(
-                message=f'媒体文件验证失败',
-                data={'validation_errors': validation_errors}
-            )
-
-        # 使用新的图片级并发批量分析任务
-        from ..tasks.batch_processor import analyze_images_with_concurrency_task
-
-        # 准备媒体ID列表（只包括没有正在进行的任务的）
-        valid_media_ids = []
-        from ..models import OllamaAIModel, OllamaImageAnalysis
-
-        # 获取模型
-        if model_name:
-            model = OllamaAIModel.objects.get(name=model_name, endpoint__created_by=self.viewset.request.user)
-        else:
-            model = OllamaAIModel.objects.filter(
+        # 验证模型
+        try:
+            model = OllamaAIModel.objects.get(
+                name=model_name,
                 endpoint__created_by=self.viewset.request.user,
-                is_default=True
-            ).first()
-            if not model:
-                return BaseResponseHandler.error_response(
-                    message='没有可用的分析模型'
-                )
-
-        # 检查每个媒体文件是否有重复任务
-        for media_id, _ in media_items:
-            media = Media.objects.get(id=media_id, user=self.viewset.request.user)
-
-            # 检查重复任务
-            existing_analysis = OllamaImageAnalysis.objects.filter(
-                media=media,
-                model=model,
-                analysis_options=analysis_options,
-                status__in=['pending', 'processing']
-            ).first()
-
-            if not existing_analysis:
-                valid_media_ids.append(media_id)
-
-        if not valid_media_ids:
+                is_active=True,
+                is_vision_capable=True
+            )
+        except OllamaAIModel.DoesNotExist:
             return BaseResponseHandler.error_response(
-                message='没有可分析的文件（所有文件都有任务在进行）'
+                message=f'模型 "{model_name}" 不存在或不支持视觉分析'
             )
 
-        logger.info(f"启动图片级并发批量分析任务: {len(valid_media_ids)} 个图片，用户: {self.viewset.request.user.id}")
-
-        # 启动图片级并发批量分析任务
-        task = analyze_images_with_concurrency_task.run_async(
-            media_ids=valid_media_ids,
-            model_name=model_name,
-            analysis_options=analysis_options,
-            user_id=self.viewset.request.user.id
+        # 验证媒体文件
+        media_items = Media.objects.filter(
+            id__in=media_ids,
+            user=self.viewset.request.user
         )
 
-        batch_result = {
-            'success_count': len(valid_media_ids),
-            'error_count': 0,
-            'total_processing_time_ms': 0,
-            'task_id': str(task.id)
-        }
+        if len(media_items) != len(media_ids):
+            found_ids = [item.id for item in media_items]
+            missing_ids = [mid for mid in media_ids if mid not in found_ids]
+            return BaseResponseHandler.error_response(
+                message=f'以下媒体文件不存在或无权访问: {missing_ids}'
+            )
 
-        # 构建异步响应数据
-        results = []
-        errors = []
+        # 处理并发控制参数
+        max_concurrent = options.get('max_concurrent', getattr(settings, 'OLLAMA_DEFAULT_CONCURRENT', 3))
+        use_concurrency = options.get('use_concurrency', True)
 
-        # 为每个有效的媒体ID创建任务记录
-        for media_id in valid_media_ids:
-            results.append({
-                'media_id': media_id,
+        if not isinstance(max_concurrent, int) or max_concurrent < 1 or max_concurrent > 20:
+            return BaseResponseHandler.error_response(
+                message='max_concurrent必须在1-20之间'
+            )
+
+        # 检查重复任务
+        existing_analyses = OllamaImageAnalysis.objects.filter(
+            media__in=media_items,
+            model=model,
+            status__in=['pending', 'processing']
+        ).values_list('media_id', flat=True)
+
+        if existing_analyses:
+            return BaseResponseHandler.error_response(
+                message=f'以下媒体已有正在进行的分析任务: {list(existing_analyses)}'
+            )
+
+        # 创建分析任务记录
+        analysis_tasks = []
+        for media in media_items:
+            analysis = OllamaImageAnalysis.objects.create(
+                media=media,
+                model=model,
+                status='pending',
+                analysis_options=options,
+                created_at=timezone.now()
+            )
+            analysis_tasks.append(analysis)
+
+        # 启动异步批量处理任务
+        try:
+            task = analyze_batch_images_task.run_async(
+                user_id=self.viewset.request.user.id,
+                analysis_ids=[analysis.id for analysis in analysis_tasks],
+                model_name=model_name,
+                max_concurrent=max_concurrent if use_concurrency else 1
+            )
+
+            logger.info(f"启动批量分析任务: task_id={task.id}, 媒体数量={len(media_items)}, 并发数={max_concurrent}")
+
+        except Exception as e:
+            logger.error(f"启动批量分析任务失败: {str(e)}")
+            # 取消已创建的分析任务
+            OllamaImageAnalysis.objects.filter(id__in=[a.id for a in analysis_tasks]).update(
+                status='failed',
+                error_message=f'批量任务启动失败: {str(e)}'
+            )
+            return BaseResponseHandler.error_response(
+                message=f'启动批量分析任务失败: {str(e)}'
+            )
+
+        # 构建响应数据
+        submitted_tasks = []
+        for analysis in analysis_tasks:
+            submitted_tasks.append({
+                'media_id': analysis.media.id,
+                'media_title': analysis.media.title or f"图片_{analysis.media.id}",
+                'analysis_id': analysis.id,  # 保留用于查询状态
                 'status': 'pending',
-                'message': '批量分析任务已启动',
-                'task_id': batch_result['task_id']
+                'message': '批量分析任务已启动'
             })
 
-        # 添加验证错误
-        errors.extend(validation_errors)
-
         return BaseResponseHandler.success_response(
-            message=f'批量分析任务已启动: {len(valid_media_ids)} 个文件正在处理',
+            message=f'批量分析任务已启动: {len(media_items)} 个文件已提交',
             data={
                 'batch_info': {
-                    'total_requested': len(media_ids),
-                    'valid_count': len(valid_media_ids),
-                    'skipped_count': len(media_ids) - len(valid_media_ids),
-                    'max_concurrent': analysis_options.get('max_concurrent', 5),
-                    'task_id': batch_result['task_id']
+                    'task_id': str(task.id),  # 异步任务队列ID
+                    'total_media': len(media_items),
+                    'max_concurrent': max_concurrent,
+                    'use_concurrency': use_concurrency,
+                    'model_name': model_name
                 },
-                'submitted_tasks': results,
-                'failed_items': errors,
-                'total_count': len(media_ids),
-                'success_count': len(valid_media_ids),
-                'error_count': len(errors)
+                'submitted_tasks': submitted_tasks,
+                'total_count': len(media_items)
             }
         )
 
@@ -347,110 +377,132 @@ class AnalysisBatchHandler(BaseViewSetMixin):
         return self.analyzer._prepare_single_analysis(analysis, prompt_text)
 
     def batch_cancel_tasks(self):
-        """批量取消任务"""
+        """批量取消任务 - 简化实现"""
+        from ..models import OllamaImageAnalysis
+        from django_async_manager.models import Task
+
         analysis_ids = self.viewset.request.data.get('analysis_ids', [])
+        task_ids = self.viewset.request.data.get('task_ids', [])
 
         # 验证输入参数
-        if not isinstance(analysis_ids, list) or not analysis_ids:
+        if not analysis_ids and not task_ids:
             return BaseResponseHandler.error_response(
-                message='analysis_ids 必须是非空数组'
+                message='必须提供 analysis_ids 或 task_ids 参数'
             )
 
-        if len(analysis_ids) > 50:  # 限制批量大小
-            return BaseResponseHandler.error_response(
-                message='单次批量操作最多支持50个任务'
-            )
-
-        # 批量取消任务
-        results = []
-        errors = []
-
-        for analysis_id in analysis_ids:
-            try:
-                result = self.task_manager.cancel_task(analysis_id, self.viewset.request.user)
-
-                if result['success']:
-                    results.append({
-                        'analysis_id': analysis_id,
-                        'task_id': result['task_id']
-                    })
-                else:
-                    errors.append({
-                        'analysis_id': analysis_id,
-                        'error': result['error']
-                    })
-
-            except Exception as e:
-                errors.append({
-                    'analysis_id': analysis_id,
-                    'error': str(e)
-                })
-
-        return BaseResponseHandler.success_response(
-            message=f'批量任务取消完成: 成功 {len(results)} 个, 失败 {len(errors)} 个',
-            data={
-                'cancelled_tasks': results,
-                'errors': errors,
-                'total_count': len(analysis_ids),
-                'success_count': len(results),
-                'error_count': len(errors)
-            }
-        )
-
-    def cancel_all_tasks(self):
-        """取消用户所有的任务"""
-        try:
-            # 获取用户所有的分析任务
-            from ..models import OllamaImageAnalysis
-
-            # 查询用户所有的任务，包括正在运行、等待中等状态
-            user_tasks = OllamaImageAnalysis.objects.filter(
-                media__user=self.viewset.request.user
-            ).values_list('id', flat=True)
-
-            if not user_tasks:
-                return BaseResponseHandler.success_response(
-                    message='没有找到需要取消的任务',
-                    data={
-                        'total_count': 0,
-                        'cancelled_count': 0,
-                        'error_count': 0
-                    }
-                )
-
-            # 批量取消所有任务
-            results = []
+        # 优先使用 task_ids 取消异步任务
+        if task_ids:
+            cancelled_tasks = []
             errors = []
 
-            for task_id in user_tasks:
+            for task_id in task_ids:
                 try:
-                    result = self.task_manager.cancel_task(task_id, self.viewset.request.user)
+                    task = Task.objects.filter(
+                        id=task_id,
+                        status__in=['pending', 'running', 'retry']
+                    ).first()
 
-                    if result['success']:
-                        results.append({
-                            'analysis_id': task_id,
-                            'task_id': result['task_id']
-                        })
-                    else:
+                    if not task:
                         errors.append({
-                            'analysis_id': task_id,
-                            'error': result['error']
+                            'task_id': task_id,
+                            'error': '任务不存在或已完成'
                         })
+                        continue
+
+                    # 标记任务为已取消
+                    task.status = 'cancelled'
+                    task.last_errors = ['用户批量取消']
+                    task.completed_at = timezone.now()
+                    task.save()
+
+                    cancelled_tasks.append({
+                        'task_id': task_id,
+                        'status': 'cancelled',
+                        'task_name': task.name
+                    })
 
                 except Exception as e:
                     errors.append({
-                        'analysis_id': task_id,
+                        'task_id': task_id,
                         'error': str(e)
                     })
 
             return BaseResponseHandler.success_response(
-                message=f'取消所有任务完成: 成功 {len(results)} 个, 失败 {len(errors)} 个',
+                message=f'批量取消任务完成: 成功 {len(cancelled_tasks)} 个, 失败 {len(errors)} 个',
                 data={
-                    'cancelled_tasks': results,
+                    'cancel_method': 'task_ids',
+                    'cancelled_tasks': cancelled_tasks,
                     'errors': errors,
-                    'total_count': len(user_tasks),
-                    'success_count': len(results),
+                    'total_count': len(task_ids),
+                    'success_count': len(cancelled_tasks),
                     'error_count': len(errors)
+                }
+            )
+
+        # 使用 analysis_ids 取消分析任务
+        if analysis_ids:
+            # 获取用户的分析任务
+            analyses = OllamaImageAnalysis.objects.filter(
+                id__in=analysis_ids,
+                media__user=self.viewset.request.user,
+                status__in=['pending', 'processing']
+            )
+
+            cancelled_count = analyses.update(
+                status='cancelled',
+                completed_at=timezone.now(),
+                error_message='用户批量取消'
+            )
+
+            # 检查哪些任务不存在或无法取消
+            found_ids = set(analyses.values_list('id', flat=True))
+            missing_ids = [aid for aid in analysis_ids if aid not in found_ids]
+
+            return BaseResponseHandler.success_response(
+                message=f'批量取消任务完成: 成功取消 {cancelled_count} 个任务',
+                data={
+                    'cancel_method': 'analysis_ids',
+                    'cancelled_count': cancelled_count,
+                    'not_found_or_completed': missing_ids,
+                    'total_count': len(analysis_ids),
+                    'success_count': cancelled_count,
+                    'error_count': len(missing_ids)
+                }
+            )
+
+    def cancel_all_tasks(self):
+        """取消用户所有进行中和待处理的任务 - 简化实现"""
+        from ..models import OllamaImageAnalysis
+        from django_async_manager.models import Task
+
+        try:
+            # 取消数据库中的分析任务
+            cancelled_analyses = OllamaImageAnalysis.objects.filter(
+                media__user=self.viewset.request.user,
+                status__in=['pending', 'processing']
+            ).update(
+                status='cancelled',
+                completed_at=timezone.now(),
+                error_message='用户取消所有任务'
+            )
+
+            # 取消异步队列中的任务
+            cancelled_async_tasks = Task.objects.filter(
+                arguments__user_id=str(self.viewset.request.user.id),
+                status__in=['pending', 'running', 'retry']
+            ).update(
+                status='cancelled',
+                last_errors=['用户取消所有任务'],
+                completed_at=timezone.now()
+            )
+
+            return BaseResponseHandler.success_response(
+                message=f'取消所有任务完成: 分析任务 {cancelled_analyses} 个, 异步任务 {cancelled_async_tasks} 个',
+                data={
+                    'cancelled_analyses': cancelled_analyses,
+                    'cancelled_async_tasks': cancelled_async_tasks,
+                    'total_cancelled': cancelled_analyses + cancelled_async_tasks,
+                    'cancellation_methods': ['数据库状态更新', '异步任务取消']
                 }
             )
 

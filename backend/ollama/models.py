@@ -187,6 +187,14 @@ class OllamaImageAnalysis(models.Model):
         help_text='图片分析的配置参数'
     )
 
+    # 分析结果
+    analysis_results = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name='分析结果',
+        help_text='图片分析的结果数据'
+    )
+
     # 使用的提示词
     prompt = models.TextField(
         blank=True,
@@ -271,63 +279,44 @@ class OllamaImageAnalysis(models.Model):
         )
 
     def mark_as_started(self):
-        """标记任务开始"""
-        from django.utils import timezone
-        self.status = 'processing'
-        self.started_at = timezone.now()
-        self.save(update_fields=['status', 'started_at'])
+        """标记任务开始（使用原子状态管理）"""
+        from .tasks.atomic_state_manager import atomic_state_manager
+        atomic_state_manager.update_analysis_status(
+            analysis_id=self.id,
+            from_status='pending',
+            to_status='processing'
+        )
 
     def mark_as_completed(self, processing_time_ms=None):
-        """标记任务完成"""
-        from django.utils import timezone
-        self.status = 'completed'
-        self.completed_at = timezone.now()
-        self.processing_time = processing_time_ms
-        self.save()
+        """标记任务完成（使用原子状态管理）"""
+        from .tasks.atomic_state_manager import atomic_state_manager
+        atomic_state_manager.update_analysis_status(
+            analysis_id=self.id,
+            from_status='processing',
+            to_status='completed',
+            processing_time=processing_time_ms
+        )
 
     def mark_as_failed(self, error_message=None):
-        """标记任务失败"""
-        from django.utils import timezone
-        self.status = 'failed'
-        self.error_message = error_message
-        self.completed_at = timezone.now()
-        self.save()
+        """标记任务失败（使用原子状态管理）"""
+        from .tasks.atomic_state_manager import atomic_state_manager
+        atomic_state_manager.update_analysis_status(
+            analysis_id=self.id,
+            from_status=None,  # 允许从任何状态转换为失败
+            to_status='failed',
+            error_message=error_message
+        )
 
     def increment_retry(self):
-        """增加重试次数"""
-        self.retry_count += 1
-        self.status = 'pending'
-        self.error_message = None
-        self.task_id = None
-        self.started_at = None
-        self.completed_at = None
-        self.save()
+        """增加重试次数（使用原子状态管理）"""
+        from .tasks.atomic_state_manager import atomic_state_manager
+        atomic_state_manager.increment_retry_count(self.id)
 
     def update_media_with_analysis_result(self, result_data):
-        """将分析结果更新到媒体模型字段上"""
+        """将分析结果更新到媒体模型字段上（使用原子状态管理）"""
         if not self.media:
             return
 
-        # 更新媒体模型的AI分析相关字段
-        from django.utils import timezone
-
-        # 假设Media模型有这些字段，根据实际字段名调整
-        if hasattr(self.media, 'ai_title') and 'title' in result_data:
-            self.media.ai_title = result_data['title']
-        if hasattr(self.media, 'ai_description') and 'description' in result_data:
-            self.media.ai_description = result_data['description']
-        if hasattr(self.media, 'ai_tags') and 'tags' in result_data:
-            # 处理标签逻辑
-            pass
-        if hasattr(self.media, 'ai_categories') and 'categories' in result_data:
-            # 处理分类逻辑
-            pass
-        if hasattr(self.media, 'ai_prompt') and 'prompt' in result_data:
-            self.media.ai_prompt = result_data['prompt']
-
-        # 标记AI分析完成时间
-        if hasattr(self.media, 'ai_analyzed_at'):
-            self.media.ai_analyzed_at = timezone.now()
-
-        # 保存媒体模型更新
-        self.media.save()
+        # 使用原子状态管理器更新媒体
+        from .tasks.atomic_state_manager import atomic_state_manager
+        atomic_state_manager.update_media_with_analysis_result(self, result_data)

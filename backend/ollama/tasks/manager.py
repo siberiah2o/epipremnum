@@ -9,7 +9,8 @@ from django.contrib.auth import get_user_model
 from django_async_manager.models import Task
 
 from ..models import OllamaImageAnalysis, OllamaAIModel
-from .celery_tasks import analyze_image_with_ollama_task, retry_failed_analysis_task, cancel_analysis_task
+from .async_tasks import analyze_image_with_ollama_task, cancel_analysis_task
+from .atomic_state_manager import atomic_state_manager
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -34,37 +35,28 @@ class OllamaTaskManager:
             if not model:
                 return {'success': False, 'error': '没有可用的分析模型'}
 
-            # 检查重复任务 - 只检查正在运行的任务（pending或processing）
-            # 已完成的任务允许重新分析
-            existing_analysis = OllamaImageAnalysis.objects.filter(
-                media=media,
-                model=model,
-                analysis_options=analysis_options or {},
-                status__in=['pending', 'processing']
-            ).first()
-
-            if existing_analysis:
-                # 返回正在运行的任务信息
-                return {
-                    'success': False,
-                    'error': f'该媒体文件已有相同的分析任务正在进行中（分析ID: {existing_analysis.id}，任务ID: {existing_analysis.task_id or "未分配"}）',
-                    'data': {
-                        'analysis_id': existing_analysis.id,
-                        'task_id': existing_analysis.task_id or "未分配",
-                        'media_id': media_id,
-                        'model_name': existing_analysis.model.name if existing_analysis.model else None,
-                        'status': existing_analysis.status,
-                        'is_duplicate': True
-                    }
-                }
-
-            # 创建分析记录
-            analysis = OllamaImageAnalysis.objects.create(
+            # 使用原子状态管理器创建分析记录
+            analysis, created = atomic_state_manager.create_analysis_safely(
                 media=media,
                 model=model,
                 analysis_options=analysis_options or {},
                 prompt=prompt
             )
+
+            # 如果返回了已存在的任务，返回其信息
+            if not created:
+                return {
+                    'success': False,
+                    'error': f'该媒体文件已有相同的分析任务正在进行中（分析ID: {analysis.id}，任务ID: {analysis.task_id or "未分配"}）',
+                    'data': {
+                        'analysis_id': analysis.id,
+                        'task_id': analysis.task_id or "未分配",
+                        'media_id': media_id,
+                        'model_name': analysis.model.name if analysis.model else None,
+                        'status': analysis.status,
+                        'is_duplicate': True
+                    }
+                }
 
             # 启动异步任务
             task = analyze_image_with_ollama_task.run_async(analysis_id=analysis.id)
@@ -106,7 +98,7 @@ class OllamaTaskManager:
                 'created_at': analysis.created_at.isoformat(),
                 'started_at': analysis.started_at.isoformat() if analysis.started_at else None,
                 'completed_at': analysis.completed_at.isoformat() if analysis.completed_at else None,
-                'processing_time_ms': analysis.processing_time,
+                'processing_time_s': round(analysis.processing_time / 1000, 2) if analysis.processing_time else None,
                 'retry_count': analysis.retry_count,
                 'model_name': analysis.model.name if analysis.model else None,
                 'can_retry': analysis.can_retry(),
@@ -133,14 +125,21 @@ class OllamaTaskManager:
                     'error': f'任务无法重试: status={analysis.status}, retries={analysis.retry_count}'
                 }
 
-            task = retry_failed_analysis_task.run_async(analysis_id=analysis_id)
+            # 增加重试次数
+            analysis.increment_retry()
+            
+            # 重新启动分析任务
+            task = analyze_image_with_ollama_task.run_async(analysis_id=analysis_id)
+            analysis.task_id = task.id
+            analysis.save(update_fields=['task_id'])
+            
             logger.info(f"🔄 重试任务启动: analysis_id={analysis_id}, task_id={task.id}")
 
             return {
                 'success': True,
                 'analysis_id': analysis_id,
                 'task_id': str(task.id),
-                'retry_count': analysis.retry_count + 1
+                'retry_count': analysis.retry_count
             }
 
         except OllamaImageAnalysis.DoesNotExist:
@@ -198,7 +197,7 @@ class OllamaTaskManager:
                     'progress': task.task_progress,
                     'model_name': task.model.name if task.model else None,
                     'created_at': task.created_at.isoformat(),
-                    'processing_time_ms': task.processing_time,
+                    'processing_time_s': round(task.processing_time / 1000, 2) if task.processing_time else None,
                     'retry_count': task.retry_count,
                     'can_retry': task.can_retry(),
                     'error_message': task.error_message

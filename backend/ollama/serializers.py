@@ -208,6 +208,14 @@ class OllamaImageAnalysisSerializer(serializers.ModelSerializer):
         """获取处理耗时"""
         duration = obj.get_processing_duration()
         return duration if duration is not None else None
+    
+    def get_processing_time_s(self, obj):
+        """获取处理时间（秒）"""
+        processing_time_ms = obj.processing_time
+        if processing_time_ms is not None:
+            # 将毫秒转换为秒，保留2位小数
+            return round(processing_time_ms / 1000, 2)
+        return None
 
 
 class OllamaImageAnalysisTaskCreateSerializer(serializers.Serializer):
@@ -215,7 +223,7 @@ class OllamaImageAnalysisTaskCreateSerializer(serializers.Serializer):
     analysis_id = serializers.IntegerField()
     task_id = serializers.CharField(allow_null=True)
     media_id = serializers.IntegerField()
-    model_name = serializers.CharField(allow_null=True, required=False)
+    model_name = serializers.CharField(source='model.name', allow_null=True, required=False)
     status = serializers.CharField()
 
 
@@ -225,11 +233,11 @@ class OllamaImageAnalysisTaskStatusSerializer(serializers.Serializer):
     media_id = serializers.IntegerField(read_only=True)
     status = serializers.CharField(read_only=True)
     progress = serializers.IntegerField(read_only=True)
-    model_name = serializers.CharField(read_only=True)
+    model_name = serializers.CharField(source='model.name', read_only=True)
     created_at = serializers.DateTimeField(read_only=True)
     started_at = serializers.DateTimeField(read_only=True)
     completed_at = serializers.DateTimeField(read_only=True)
-    processing_time_ms = serializers.IntegerField(read_only=True)
+    processing_time_s = serializers.SerializerMethodField(read_only=True)
     retry_count = serializers.IntegerField(read_only=True)
     can_retry = serializers.BooleanField(read_only=True)
     error_message = serializers.CharField(read_only=True, allow_null=True)
@@ -243,12 +251,20 @@ class OllamaImageAnalysisTaskListSerializer(serializers.Serializer):
     media_title = serializers.CharField(read_only=True)
     status = serializers.CharField(read_only=True)
     progress = serializers.IntegerField(read_only=True)
-    model_name = serializers.CharField(read_only=True, allow_null=True)
+    model_name = serializers.CharField(source='model.name', read_only=True, allow_null=True)
     created_at = serializers.DateTimeField(read_only=True)
-    processing_time_ms = serializers.IntegerField(read_only=True, allow_null=True)
+    processing_time_s = serializers.SerializerMethodField(read_only=True)
     retry_count = serializers.IntegerField(read_only=True)
     can_retry = serializers.BooleanField(read_only=True)
     error_message = serializers.CharField(read_only=True, allow_null=True)
+
+    def get_processing_time_s(self, obj):
+        """获取处理时间（秒）"""
+        processing_time_ms = obj.processing_time
+        if processing_time_ms is not None:
+            # 将毫秒转换为秒，保留2位小数
+            return round(processing_time_ms / 1000, 2)
+        return None
 
 
 class OllamaImageAnalysisTaskRetrySerializer(serializers.Serializer):

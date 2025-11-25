@@ -1,0 +1,985 @@
+{
+	"info": {
+		"title": "epipremnum",
+		"description": "",
+		"version": "1.0.0"
+	},
+	"openapi": "3.0.0",
+	"servers": [
+		{
+			"url": "",
+			"description": "默认环境",
+			"variables": {}
+		},
+		{
+			"url": "http://192.168.55.133:8888",
+			"description": "后端地址",
+			"variables": {}
+		}
+	],
+	"paths": {
+		"http://192.168.55.133:8888/api/ollama/endpoints/": {
+			"post": {
+				"summary": "创建端点",
+				"description": "",
+				"tags": [
+					"新端点管理 API"
+				],
+				"parameters": [
+					{
+						"name": "Accept",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "Accept-Encoding",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "Authorization",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "Connection",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "Content-Type",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "User-Agent",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object"
+							},
+							"example": "{\r\n    \"name\": \"本地Ollama服务\",\r\n    \"url\": \"http://115.190.140.100:31434\",\r\n    \"description\": \"本地部署的Ollama服务\",\r\n    \"is_default\": true\r\n  }"
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "成功",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {}
+								},
+								"example": ""
+							}
+						}
+					},
+					"404": {
+						"description": "失败",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {}
+								},
+								"example": ""
+							}
+						}
+					}
+				}
+			},
+			"get": {
+				"summary": "获取端点列表",
+				"description": "",
+				"tags": [
+					"新端点管理 API"
+				],
+				"parameters": [
+					{
+						"name": "Accept",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "Accept-Encoding",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "Authorization",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "Connection",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "Content-Type",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "User-Agent",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {}
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "成功",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {}
+								},
+								"example": ""
+							}
+						}
+					},
+					"404": {
+						"description": "失败",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {}
+								},
+								"example": ""
+							}
+						}
+					}
+				}
+			}
+		},
+		"http://192.168.55.133:8888/api/ollama/endpoints/3/": {
+			"get": {
+				"summary": "获取单个端点详情",
+				"description": "",
+				"tags": [
+					"新端点管理 API"
+				],
+				"parameters": [
+					{
+						"name": "Accept",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "Accept-Encoding",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "Authorization",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "Connection",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "Content-Type",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "User-Agent",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {}
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "成功",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {}
+								},
+								"example": ""
+							}
+						}
+					},
+					"404": {
+						"description": "失败",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {}
+								},
+								"example": ""
+							}
+						}
+					}
+				}
+			},
+			"put": {
+				"summary": "更新端点(完整更新)",
+				"description": "",
+				"tags": [
+					"新端点管理 API"
+				],
+				"parameters": [
+					{
+						"name": "Accept",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "Accept-Encoding",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "Authorization",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "Connection",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "Content-Type",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "User-Agent",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object"
+							},
+							"example": "{\r\n    \"name\": \"Ollama服务\",\r\n    \"url\": \"http://115.190.140.100:31434\",\r\n    \"description\": \"更新后的描述\",\r\n    \"is_active\": true,\r\n    \"is_default\": true\r\n  }"
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "成功",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {}
+								},
+								"example": ""
+							}
+						}
+					},
+					"404": {
+						"description": "失败",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {}
+								},
+								"example": ""
+							}
+						}
+					}
+				}
+			},
+			"patch": {
+				"summary": "部分更新(部分更新 )",
+				"description": "",
+				"tags": [
+					"新端点管理 API"
+				],
+				"parameters": [
+					{
+						"name": "Accept",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "Accept-Encoding",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "Authorization",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "Connection",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "Content-Type",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "User-Agent",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object"
+							},
+							"example": "{\r\n    \"description\": \"部分更新的描述\"\r\n  }"
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "成功",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {}
+								},
+								"example": ""
+							}
+						}
+					},
+					"404": {
+						"description": "失败",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {}
+								},
+								"example": ""
+							}
+						}
+					}
+				}
+			}
+		},
+		"http://192.168.55.133:8888/api/ollama/endpoints/default/": {
+			"get": {
+				"summary": "获取默认端点",
+				"description": "",
+				"tags": [
+					"新端点管理 API"
+				],
+				"parameters": [
+					{
+						"name": "Accept",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "Accept-Encoding",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "Authorization",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "Connection",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "Content-Type",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "User-Agent",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {}
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "成功",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {}
+								},
+								"example": ""
+							}
+						}
+					},
+					"404": {
+						"description": "失败",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {}
+								},
+								"example": ""
+							}
+						}
+					}
+				}
+			}
+		},
+		"http://192.168.55.133:8888/api/ollama/endpoints/2/": {
+			"delete": {
+				"summary": "删除端点",
+				"description": "",
+				"tags": [
+					"新端点管理 API"
+				],
+				"parameters": [
+					{
+						"name": "Accept",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "Accept-Encoding",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "Authorization",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "Connection",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "Content-Type",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "User-Agent",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {}
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "成功",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {}
+								},
+								"example": ""
+							}
+						}
+					},
+					"404": {
+						"description": "失败",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {}
+								},
+								"example": ""
+							}
+						}
+					}
+				}
+			}
+		},
+		"http://192.168.55.133:8888/api/ollama/endpoints/3/set_default/": {
+			"post": {
+				"summary": "设置默认端点",
+				"description": "",
+				"tags": [
+					"新端点管理 API"
+				],
+				"parameters": [
+					{
+						"name": "Accept",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "Accept-Encoding",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "Authorization",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "Connection",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "Content-Type",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "User-Agent",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {}
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "成功",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {}
+								},
+								"example": ""
+							}
+						}
+					},
+					"404": {
+						"description": "失败",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {}
+								},
+								"example": ""
+							}
+						}
+					}
+				}
+			}
+		},
+		"http://192.168.55.133:8888/api/ollama/endpoints/3/test_connection/": {
+			"post": {
+				"summary": "测试端点连接",
+				"description": "",
+				"tags": [
+					"新端点管理 API"
+				],
+				"parameters": [
+					{
+						"name": "Accept",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "Accept-Encoding",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "Authorization",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "Connection",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "Content-Type",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					},
+					{
+						"name": "User-Agent",
+						"in": "header",
+						"description": "",
+						"required": true,
+						"example": "",
+						"schema": {
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {}
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "成功",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {}
+								},
+								"example": ""
+							}
+						}
+					},
+					"404": {
+						"description": "失败",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"properties": {}
+								},
+								"example": ""
+							}
+						}
+					}
+				}
+			}
+		}
+	},
+	"tags": [
+		{
+			"name": "新端点管理 API",
+			"description": ""
+		}
+	]
+}
