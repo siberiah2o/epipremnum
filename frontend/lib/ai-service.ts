@@ -405,13 +405,13 @@ export class AIManagementService {
       // 首先尝试获取端点列表，测试默认端点或第一个活跃端点
       const endpointsResult = await this.getEndpoints();
 
-      if (endpointsResult && endpointsResult.endpoints && endpointsResult.endpoints.length > 0) {
+      if (endpointsResult && endpointsResult.length > 0) {
         // 查找默认端点
-        const defaultEndpoint = endpointsResult.endpoints.find(ep => ep.is_default);
+        const defaultEndpoint = endpointsResult.find(ep => ep.is_default);
         // 如果没有默认端点，使用第一个活跃端点
-        const activeEndpoint = defaultEndpoint || endpointsResult.endpoints.find(ep => ep.is_active);
+        const activeEndpoint = defaultEndpoint || endpointsResult.find(ep => ep.is_active);
         // 如果没有活跃端点，使用第一个端点
-        const testEndpoint = activeEndpoint || endpointsResult.endpoints[0];
+        const testEndpoint = activeEndpoint || endpointsResult[0];
 
         // 测试选定的端点
         const result = await this.testEndpoint(testEndpoint.id);
