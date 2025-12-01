@@ -23,10 +23,10 @@ export interface OllamaEndpoint {
   description?: string;
   is_active: boolean;
   is_default: boolean;
-  timeout: number;
-  created_by?: string;
-  created_at?: string;
-  updated_at?: string;
+  created_by: number;
+  created_by_username: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface CreateEndpointRequest {

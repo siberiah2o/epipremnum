@@ -13,14 +13,19 @@ export const useAIModels = () => {
   const fetchModels = useCallback(async () => {
     try {
       setLoading(true);
-      const data = await apiRequest("/api/ollama/models/default/");
-      // API返回格式: {code:200, message:"...", data:{models:[...], total:number}}
-      setModels(data.data?.models || []);
+      const data = await apiRequest("/api/ollama/models/");
+
+      // 检查是否是认证失败的响应
+      if (data && data.authError) {
+        toast.error(data.message);
+        setModels([]);
+        return;
+      }
+
+      // API返回格式: {code:200, message:"...", data:[...]}
+      setModels(data.data || []);
     } catch (err: any) {
       console.error("获取模型失败:", err);
-      if (err.status === 401) {
-        toast.error("认证失败，请重新登录");
-      }
       setError("无法获取模型列表: " + err.message);
       setModels([]);
     } finally {
@@ -37,7 +42,7 @@ export const useAIModels = () => {
       try {
         // 模型刷新可能需要较长时间，设置5分钟超时
         const result = await apiRequest(
-          "/api/ollama/models/refresh/",
+          "/api/ollama/models/refresh_all/",
           {
             method: "POST",
             body: JSON.stringify({ endpoint_id: endpointId }),
@@ -45,13 +50,19 @@ export const useAIModels = () => {
           300000
         ); // 5分钟超时
 
+        // 检查是否是认证失败的响应
+        if (result && result.authError) {
+          toast.error(result.message);
+          return;
+        }
+
         await fetchModels(); // 重新获取模型列表
         toast.success("模型刷新完成");
         return result;
       } catch (err: any) {
         console.error("刷新模型失败:", err);
-        setError("刷新模型失败");
-        toast.error("刷新模型失败");
+        setError("刷新模型失败: " + err.message);
+        toast.error("刷新模型失败: " + err.message);
         throw err;
       } finally {
         setIsRefreshing(false);

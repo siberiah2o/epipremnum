@@ -345,14 +345,8 @@ export class AIManagementService {
   }
 
   // 端点管理
-  async getEndpoints(): Promise<{
-    endpoints: OllamaEndpoint[];
-    total: number;
-  }> {
-    return this.request<{
-      endpoints: OllamaEndpoint[];
-      total: number;
-    }>("/api/ollama/endpoint/");
+  async getEndpoints(): Promise<OllamaEndpoint[]> {
+    return this.request<OllamaEndpoint[]>("/api/ollama/endpoints/");
   }
 
   async createEndpoint(
@@ -361,14 +355,14 @@ export class AIManagementService {
     return this.request<{
       message: string;
       endpoint: OllamaEndpoint;
-    }>("/api/ollama/endpoint/", {
+    }>("/api/ollama/endpoints/", {
       method: "POST",
       body: JSON.stringify(data),
     });
   }
 
   async getEndpoint(endpointId: number): Promise<OllamaEndpoint> {
-    return this.request<OllamaEndpoint>(`/api/ollama/endpoint/${endpointId}/`);
+    return this.request<OllamaEndpoint>(`/api/ollama/endpoints/${endpointId}/`);
   }
 
   async updateEndpoint(
@@ -378,15 +372,15 @@ export class AIManagementService {
     return this.request<{
       message: string;
       endpoint: OllamaEndpoint;
-    }>(`/api/ollama/endpoint/${endpointId}/`, {
-      method: "POST",
+    }>(`/api/ollama/endpoints/${endpointId}/`, {
+      method: "PATCH",
       body: JSON.stringify(data),
     });
   }
 
   async deleteEndpoint(endpointId: number): Promise<{ message: string }> {
     return this.request<{ message: string }>(
-      `/api/ollama/endpoint/${endpointId}/delete/`,
+      `/api/ollama/endpoints/${endpointId}/delete/`,
       {
         method: "POST",
       }
@@ -394,12 +388,15 @@ export class AIManagementService {
   }
 
   async testEndpoint(endpointId?: number): Promise<EndpointTestResult> {
-    const url = endpointId
-      ? `/api/ollama/endpoint/${endpointId}/test/`
-      : "/api/ollama/endpoint/test/";
-    return this.request<EndpointTestResult>(url, {
-      method: "GET",
-    });
+    if (!endpointId) {
+      throw new Error("端点ID是必需的");
+    }
+    return this.request<EndpointTestResult>(
+      `/api/ollama/endpoints/${endpointId}/test_connection/`,
+      {
+        method: "POST",
+      }
+    );
   }
 
   // 通用连接测试 - 通过测试默认端点来实现
@@ -465,12 +462,11 @@ export class AIManagementService {
   }
 
   async refreshModels(endpointId?: number): Promise<ModelSyncResult> {
-    const url = endpointId
-      ? `/api/ollama/models/refresh/?endpoint_id=${endpointId}`
-      : "/api/ollama/models/refresh/";
-
-    const response = await this.request<any>(url, {
+    const response = await this.request<any>("/api/ollama/models/refresh_all/", {
       method: "POST",
+      body: JSON.stringify({
+        endpoint_id: endpointId,
+      }),
     });
 
     // 后端返回格式调整
@@ -522,7 +518,7 @@ export class AIManagementService {
   ): Promise<any> {
     // 使用并发管理器执行请求
     const requestFn = () => this.request<any>(
-      "/api/ollama/analyze/single/",
+      "/api/ollama/analyze/",
       {
         method: "POST",
         body: JSON.stringify({
@@ -546,21 +542,15 @@ export class AIManagementService {
 
   // 查询分析任务状态
   async getAnalysisStatus(analysisId: number): Promise<any> {
-    return this.request<any>("/api/ollama/analyze/status/", {
-      method: "POST",
-      body: JSON.stringify({
-        analysis_id: analysisId,
-      }),
+    return this.request<any>(`/api/ollama/analyze/${analysisId}/status/`, {
+      method: "GET",
     });
   }
 
   // 获取分析详情
   async getAnalysisDetail(analysisId: number): Promise<any> {
-    return this.request<any>("/api/ollama/analyze/detail/", {
-      method: "POST",
-      body: JSON.stringify({
-        analysis_id: analysisId,
-      }),
+    return this.request<any>(`/api/ollama/analyze/${analysisId}/status/`, {
+      method: "GET",
     });
   }
 
@@ -576,11 +566,8 @@ export class AIManagementService {
 
   // 重试失败任务
   async retryAnalysis(analysisId: number): Promise<any> {
-    return this.request<any>("/api/ollama/analyze/retry/", {
+    return this.request<any>(`/api/ollama/analyze/${analysisId}/retry/`, {
       method: "POST",
-      body: JSON.stringify({
-        analysis_id: analysisId,
-      }),
     });
   }
 
@@ -597,13 +584,15 @@ export class AIManagementService {
   
   
   async getAnalysisList(page: number = 1, pageSize: number = 20, status?: string): Promise<any> {
-    return this.request<any>("/api/ollama/analyze/list/", {
-      method: "POST",
-      body: JSON.stringify({
-        page: page,
-        page_size: pageSize,
-        status: status, // 可选的状态筛选 (pending, processing, completed, failed)
-      }),
+    const params = new URLSearchParams({
+      limit: pageSize.toString(),
+      offset: ((page - 1) * pageSize).toString(),
+    });
+    if (status) {
+      params.append('status', status);
+    }
+    return this.request<any>(`/api/ollama/analyze/list_tasks/?${params}`, {
+      method: "GET",
     });
   }
 

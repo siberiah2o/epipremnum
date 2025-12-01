@@ -12,14 +12,19 @@ export const useAIEndpoints = () => {
   const fetchEndpoints = useCallback(async () => {
     try {
       setLoading(true);
-      const data = await apiRequest("/api/ollama/endpoint/");
-      // API返回格式: {code:200, message:"...", data:{endpoints:[...], total:number}}
-      setEndpoints(data.data?.endpoints || []);
+      const data = await apiRequest("/api/ollama/endpoints/");
+
+      // 检查是否是认证失败的响应
+      if (data && data.authError) {
+        toast.error(data.message);
+        setEndpoints([]);
+        return;
+      }
+
+      // API返回格式: {code:200, message:"...", data:[...]}
+      setEndpoints(data.data || []);
     } catch (err: any) {
       console.error("获取端点失败:", err);
-      if (err.status === 401) {
-        toast.error("认证失败，请重新登录");
-      }
       setEndpoints([]);
     } finally {
       setLoading(false);
@@ -30,10 +35,16 @@ export const useAIEndpoints = () => {
   const createEndpoint = useCallback(
     async (data: CreateEndpointRequest) => {
       try {
-        await apiRequest("/api/ollama/endpoint/", {
+        const result = await apiRequest("/api/ollama/endpoints/", {
           method: "POST",
           body: JSON.stringify(data),
         });
+
+        // 检查是否是认证失败的响应
+        if (result && result.authError) {
+          toast.error(result.message);
+          return false;
+        }
 
         toast.success("端点创建成功");
         await fetchEndpoints();
@@ -51,10 +62,16 @@ export const useAIEndpoints = () => {
   const updateEndpoint = useCallback(
     async (id: number, data: CreateEndpointRequest) => {
       try {
-        await apiRequest(`/api/ollama/endpoint/${id}/`, {
-          method: "POST",
+        const result = await apiRequest(`/api/ollama/endpoints/${id}/`, {
+          method: "PATCH",
           body: JSON.stringify(data),
         });
+
+        // 检查是否是认证失败的响应
+        if (result && result.authError) {
+          toast.error(result.message);
+          return false;
+        }
 
         toast.success("端点更新成功");
         await fetchEndpoints();
@@ -85,9 +102,15 @@ export const useAIEndpoints = () => {
       if (!confirm(confirmMessage)) return false;
 
       try {
-        await apiRequest(`/api/ollama/endpoint/${endpoint.id}/delete/`, {
+        const result = await apiRequest(`/api/ollama/endpoints/${endpoint.id}/delete/`, {
           method: "POST",
         });
+
+        // 检查是否是认证失败的响应
+        if (result && result.authError) {
+          toast.error(result.message);
+          return false;
+        }
 
         toast.success(`端点 "${endpoint.name}" 删除成功`);
         await fetchEndpoints();
@@ -107,10 +130,19 @@ export const useAIEndpoints = () => {
       try {
         // 端点连接测试可能需要较长时间，设置30秒超时
         const result = await apiRequest(
-          `/api/ollama/endpoint/${endpointId}/test/`,
-          {},
+          `/api/ollama/endpoints/${endpointId}/test_connection/`,
+          {
+            method: "POST",
+          },
           30000
         );
+
+        // 检查是否是认证失败的响应
+        if (result && result.authError) {
+          toast.error(result.message);
+          return false;
+        }
+
         toast.success(result.message || "端点连接成功");
         return true;
       } catch (err: any) {

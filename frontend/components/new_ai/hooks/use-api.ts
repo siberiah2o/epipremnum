@@ -1,7 +1,7 @@
 import { useState, useCallback } from "react";
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL || "http://192.168.55.133:8888";
+// 使用相对路径，通过Next.js代理访问后端
+const API_BASE_URL = "";
 
 export const useApi = () => {
   const [loading, setLoading] = useState(false);
@@ -52,14 +52,24 @@ export const useApi = () => {
 
         if (!response.ok) {
           if (response.status === 401) {
-            throw new Error("认证失败，请重新登录");
+            // 认证失败不抛出错误，返回特殊结构让调用方处理
+            return {
+              authError: true,
+              message: "认证失败，请重新登录",
+              status: 401
+            };
           } else if (response.status === 403) {
             throw new Error("权限不足");
           }
           throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
 
-        return await response.json();
+        // 只有在响应成功时才尝试解析JSON
+        try {
+          return await response.json();
+        } catch (parseError) {
+          throw new Error("响应格式错误，无法解析JSON");
+        }
       } catch (err: any) {
         let errorMessage = err.message || "请求失败";
         if (err.name === "AbortError") {

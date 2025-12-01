@@ -1,6 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Loader2, AlertCircle, Brain } from "lucide-react";
+import { toast } from "sonner";
 import { ModelCard } from "./model-card";
 import { ConnectionStatus } from "./connection-status";
 import { ModelStats } from "./model-stats";
@@ -28,15 +29,27 @@ export function ModelManagement() {
 
   // 测试连接
   const handleTestConnection = async () => {
-    if (defaultEndpoint) {
-      await testConnection(defaultEndpoint.id);
+    try {
+      if (defaultEndpoint) {
+        await testConnection(defaultEndpoint.id);
+      } else {
+        toast.error('请先设置默认端点');
+      }
+    } catch (error) {
+      console.error('测试连接失败:', error);
     }
   };
 
   // 刷新模型
   const handleRefreshModels = async () => {
-    if (defaultEndpoint) {
-      await refreshModels(defaultEndpoint.id);
+    try {
+      if (defaultEndpoint) {
+        await refreshModels(defaultEndpoint.id);
+      } else {
+        await refreshModels(); // 不传参数，刷新所有端点
+      }
+    } catch (error) {
+      console.error('刷新模型失败:', error);
     }
   };
 

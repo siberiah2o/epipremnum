@@ -472,7 +472,7 @@ export function NewAnalysisPanel({
                     }-${index}`}
                     value={model.name}
                   >
-                    {model.display_name} ({model.model_size})
+                    {model.name} ({model.model_size})
                   </option>
                 ))}
                 {modelsLoading ? (

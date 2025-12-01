@@ -18,10 +18,20 @@ export const useAIConnection = () => {
       try {
         // 连接测试可能需要较长时间，设置30秒超时
         const result = await apiRequest(
-          `/api/ollama/endpoint/${endpointId}/test/`,
-          {},
+          `/api/ollama/endpoints/${endpointId}/test_connection/`,
+          {
+            method: "POST",
+          },
           30000
         );
+
+        // 检查是否是认证失败的响应
+        if (result && result.authError) {
+          setConnectionStatus("failed");
+          toast.error(result.message);
+          return false;
+        }
+
         setConnectionStatus("connected");
         toast.success("连接测试成功");
         return true;

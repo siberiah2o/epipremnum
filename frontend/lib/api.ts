@@ -917,7 +917,7 @@ class ApiClient {
     mediaId: number,
     options: CombinedAnalysisOptions
   ): Promise<ApiResponse<any>> {
-    return this.request<any>("/api/ollama/analyze/single/", {
+    return this.request<any>("/api/ollama/analyze/", {
       method: "POST",
       body: JSON.stringify({
         media_id: mediaId,
@@ -943,11 +943,11 @@ class ApiClient {
 
   // 刷新 Ollama 模型
   async refreshOllamaModels(endpointId?: number): Promise<ApiResponse<any>> {
-    const url = endpointId
-      ? `/api/ollama/models/refresh/?endpoint_id=${endpointId}`
-      : "/api/ollama/models/refresh/";
-    return this.request<any>(url, {
+    return this.request<any>("/api/ollama/models/refresh_all/", {
       method: "POST",
+      body: JSON.stringify({
+        endpoint_id: endpointId,
+      }),
     });
   }
 
@@ -998,7 +998,7 @@ class ApiClient {
   ): Promise<ApiResponse<any>> {
     // AI分析使用较短的30秒超时，因为这是创建任务请求
     return this.requestWithTimeout<any>(
-      "/api/ollama/analyze/single/",
+      "/api/ollama/analyze/",
       {
         method: "POST",
         body: JSON.stringify({
@@ -1023,16 +1023,9 @@ class ApiClient {
   async getAIAnalysisStatus(analysisId: number): Promise<ApiResponse<any>> {
     console.log(`🚀 [API] 获取分析状态: analysisId=${analysisId}`);
 
-    const requestData = {
-      analysis_id: analysisId,
-    };
-
-    console.log(`🚀 [API] 请求参数:`, requestData);
-
     try {
-      const response = await this.request<any>("/api/ollama/analyze/detail/", {
-        method: "POST",
-        body: JSON.stringify(requestData),
+      const response = await this.request<any>(`/api/ollama/analyze/${analysisId}/status/`, {
+        method: "GET",
       });
 
       console.log(`🚀 [API] 分析状态响应:`, response);
@@ -1048,22 +1041,24 @@ class ApiClient {
     page: number = 1,
     pageSize: number = 20
   ): Promise<ApiResponse<any>> {
-    return this.request<any>("/api/ollama/analyze/list/", {
-      method: "POST",
-      body: JSON.stringify({
-        page: page,
-        page_size: pageSize,
-      }),
+    // 计算offset，后端使用offset而不是page
+    const offset = (page - 1) * pageSize;
+
+    // 使用query parameters而不是body
+    const params = new URLSearchParams({
+      limit: pageSize.toString(),
+      offset: offset.toString(),
+    });
+
+    return this.request<any>(`/api/ollama/analyze/list_tasks/?${params}`, {
+      method: "GET",
     });
   }
 
   // 获取分析结果详情
   async getAnalysisDetails(analysisId: number): Promise<ApiResponse<any>> {
-    return this.request<any>("/api/ollama/analyze/detail/", {
-      method: "POST",
-      body: JSON.stringify({
-        analysis_id: analysisId,
-      }),
+    return this.request<any>(`/api/ollama/analyze/${analysisId}/status/`, {
+      method: "GET",
     });
   }
 
@@ -1071,7 +1066,7 @@ class ApiClient {
 
   // 获取所有端点
   async getEndpoints(): Promise<ApiResponse<any>> {
-    return this.request<any>("/api/ollama/endpoint/");
+    return this.request<any>("/api/ollama/endpoints/");
   }
 
   // 创建新端点
@@ -1082,7 +1077,7 @@ class ApiClient {
     is_default?: boolean;
     timeout?: number;
   }): Promise<ApiResponse<any>> {
-    return this.request<any>("/api/ollama/endpoint/", {
+    return this.request<any>("/api/ollama/endpoints/", {
       method: "POST",
       body: JSON.stringify(data),
     });
@@ -1090,7 +1085,7 @@ class ApiClient {
 
   // 获取端点详情
   async getEndpoint(endpointId: number): Promise<ApiResponse<any>> {
-    return this.request<any>(`/api/ollama/endpoint/${endpointId}/`);
+    return this.request<any>(`/api/ollama/endpoints/${endpointId}/`);
   }
 
   // 更新端点
@@ -1105,25 +1100,27 @@ class ApiClient {
       timeout?: number;
     }
   ): Promise<ApiResponse<any>> {
-    return this.request<any>(`/api/ollama/endpoint/${endpointId}/`, {
-      method: "POST",
+    return this.request<any>(`/api/ollama/endpoints/${endpointId}/`, {
+      method: "PATCH",
       body: JSON.stringify(data),
     });
   }
 
   // 删除端点
   async deleteEndpoint(endpointId: number): Promise<ApiResponse<any>> {
-    return this.request<any>(`/api/ollama/endpoint/${endpointId}/delete/`, {
+    return this.request<any>(`/api/ollama/endpoints/${endpointId}/delete/`, {
       method: "POST",
     });
   }
 
   // 测试端点连接
   async testEndpoint(endpointId?: number): Promise<ApiResponse<any>> {
-    const url = endpointId
-      ? `/api/ollama/endpoint/${endpointId}/test/`
-      : "/api/ollama/endpoint/test/";
-    return this.request<any>(url);
+    if (!endpointId) {
+      throw new Error("端点ID是必需的");
+    }
+    return this.request<any>(`/api/ollama/endpoints/${endpointId}/test_connection/`, {
+      method: "POST",
+    });
   }
 }
 
