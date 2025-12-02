@@ -38,6 +38,7 @@ import {
 import { type MediaListItem } from "@/lib/api";
 import { useAIModels } from "../../hooks/use-ai-models";
 import { useAsyncBatchAnalysis } from "../hooks/use-async-batch-analysis";
+import { getSortedVisionModels } from "@/lib/model-utils";
 
 interface NewBatchAnalysisProps {
   mediaFiles: MediaListItem[];
@@ -98,10 +99,8 @@ export function NewBatchAnalysis({
     maxTags: 10,
   });
 
-  // 过滤出可用的视觉模型
-  const visionModels = models.filter(
-    (model) => model.is_vision_capable && model.is_active
-  );
+  // 使用工具函数获取排序后的视觉模型
+  const visionModels = getSortedVisionModels(models);
 
   // 自动选择第一个视觉模型或默认模型
   useEffect(() => {

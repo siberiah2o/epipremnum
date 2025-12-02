@@ -24,3 +24,25 @@ export interface AnalysisState {
   analyzing: boolean;
   analysisError: string | null;
 }
+
+// AI分析选项接口
+export interface AIAnalysisOptions {
+  generate_title?: boolean;
+  generate_description?: boolean;
+  generate_prompt?: boolean;
+  generate_categories?: boolean;
+  generate_tags?: boolean;
+  max_categories?: number;
+  max_tags?: number;
+  limited_scenarios?: boolean; // 启用有限场景分析
+  confidence_threshold?: number; // 置信度阈值
+}
+
+// 预定义分析场景
+export interface AnalysisScenario {
+  id: string;
+  name: string;
+  categories: string[];
+  tags: string[];
+  description: string;
+}

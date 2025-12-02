@@ -8,6 +8,8 @@ import {
   MediaFile,
   MediaListItem,
   PaginatedMediaList,
+  PaginatedCategoryList,
+  PaginatedTagList,
   CreateCategoryData,
   UpdateCategoryData,
   CreateTagData,
@@ -22,18 +24,26 @@ import {
 
 // ============ 分类管理 Hooks ============
 
-export function useCategories() {
-  const [categories, setCategories] = useState<MediaCategory[]>([])
+export function useCategories(
+  page: number = 1,
+  pageSize: number = 10,
+  search?: string
+) {
+  const [categoryList, setCategoryList] = useState<PaginatedCategoryList | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const fetchCategories = async () => {
+  const fetchCategories = async (
+    pageNum: number = page,
+    pageSizeNum: number = pageSize,
+    searchQuery?: string
+  ) => {
     setIsLoading(true)
     setError(null)
     try {
-      const response = await apiClient.getCategories()
+      const response = await apiClient.getCategories(pageNum, pageSizeNum, searchQuery)
       if (response.code === 200) {
-        setCategories(response.data)
+        setCategoryList(response.data)
       } else {
         setError(response.message)
       }
@@ -50,7 +60,8 @@ export function useCategories() {
     try {
       const response = await apiClient.createCategory(data)
       if (response.code === 200 || response.code === 201) {
-        setCategories(prev => [...prev, response.data])
+        // 重新获取第一页数据以包含新创建的分类
+        await fetchCategories(1, pageSize, search)
         return { success: true, data: response.data }
       } else {
         setError(response.message)
@@ -71,9 +82,8 @@ export function useCategories() {
     try {
       const response = await apiClient.updateCategory(id, data)
       if (response.code === 200) {
-        setCategories(prev =>
-          prev.map(cat => cat.id === id ? response.data : cat)
-        )
+        // 重新获取当前页数据以反映更新
+        await fetchCategories(page, pageSize, search)
         return { success: true, data: response.data }
       } else {
         setError(response.message)
@@ -94,7 +104,8 @@ export function useCategories() {
     try {
       const response = await apiClient.deleteCategory(id)
       if (response.code === 200) {
-        setCategories(prev => prev.filter(cat => cat.id !== id))
+        // 重新获取当前页数据以反映删除
+        await fetchCategories(page, pageSize, search)
         return { success: true }
       } else {
         setError(response.message)
@@ -110,11 +121,12 @@ export function useCategories() {
   }
 
   useEffect(() => {
-    fetchCategories()
-  }, [])
+    fetchCategories(page, pageSize, search)
+  }, [page, pageSize, search])
 
   return {
-    categories,
+    categoryList,
+    categories: categoryList?.results || [],
     isLoading,
     error,
     refetch: fetchCategories,
@@ -162,18 +174,26 @@ export function useCategory(id: number) {
 
 // ============ 标签管理 Hooks ============
 
-export function useTags() {
-  const [tags, setTags] = useState<MediaTag[]>([])
+export function useTags(
+  page: number = 1,
+  pageSize: number = 10,
+  search?: string
+) {
+  const [tagList, setTagList] = useState<PaginatedTagList | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const fetchTags = async () => {
+  const fetchTags = async (
+    pageNum: number = page,
+    pageSizeNum: number = pageSize,
+    searchQuery?: string
+  ) => {
     setIsLoading(true)
     setError(null)
     try {
-      const response = await apiClient.getTags()
+      const response = await apiClient.getTags(pageNum, pageSizeNum, searchQuery)
       if (response.code === 200) {
-        setTags(response.data)
+        setTagList(response.data)
       } else {
         setError(response.message)
       }
@@ -190,7 +210,8 @@ export function useTags() {
     try {
       const response = await apiClient.createTag(data)
       if (response.code === 200 || response.code === 201) {
-        setTags(prev => [...prev, response.data])
+        // 重新获取第一页数据以包含新创建的标签
+        await fetchTags(1, pageSize, search)
         return { success: true, data: response.data }
       } else {
         setError(response.message)
@@ -211,9 +232,8 @@ export function useTags() {
     try {
       const response = await apiClient.updateTag(id, data)
       if (response.code === 200) {
-        setTags(prev =>
-          prev.map(tag => tag.id === id ? response.data : tag)
-        )
+        // 重新获取当前页数据以反映更新
+        await fetchTags(page, pageSize, search)
         return { success: true, data: response.data }
       } else {
         setError(response.message)
@@ -234,7 +254,8 @@ export function useTags() {
     try {
       const response = await apiClient.deleteTag(id)
       if (response.code === 200) {
-        setTags(prev => prev.filter(tag => tag.id !== id))
+        // 重新获取当前页数据以反映删除
+        await fetchTags(page, pageSize, search)
         return { success: true }
       } else {
         setError(response.message)
@@ -250,11 +271,12 @@ export function useTags() {
   }
 
   useEffect(() => {
-    fetchTags()
-  }, [])
+    fetchTags(page, pageSize, search)
+  }, [page, pageSize, search])
 
   return {
-    tags,
+    tagList,
+    tags: tagList?.results || [],
     isLoading,
     error,
     refetch: fetchTags,

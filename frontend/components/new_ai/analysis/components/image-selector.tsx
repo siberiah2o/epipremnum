@@ -2,6 +2,7 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Pagination } from "@/components/ui/pagination";
 import {
   Tooltip,
   TooltipContent,
@@ -27,6 +28,8 @@ interface ImageSelectorProps {
   onNextPage: () => void;
   onPageClick: (page: number) => void;
   setKeyboardNavEnabled: (enabled: boolean) => void;
+  isLoadingDetails?: boolean;
+  loadingFileId?: number | null;
 }
 
 export function ImageSelector({
@@ -41,6 +44,8 @@ export function ImageSelector({
   onNextPage,
   onPageClick,
   setKeyboardNavEnabled,
+  isLoadingDetails = false,
+  loadingFileId = null,
 }: ImageSelectorProps) {
   const { currentPage, totalPages, totalFiles, pageSize } = pagination;
 
@@ -198,6 +203,27 @@ export function ImageSelector({
                               </div>
                             </div>
                           )}
+
+                          {/* 加载状态指示器 */}
+                          {isLoadingDetails && loadingFileId === file.id && (
+                            <div className="absolute inset-0 bg-black bg-opacity-20 flex items-center justify-center">
+                              <div className="bg-white rounded-full p-1.5">
+                                <svg
+                                  className="w-4 h-4 text-primary animate-spin"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  viewBox="0 0 24 24"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    strokeWidth={2}
+                                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                                  />
+                                </svg>
+                              </div>
+                            </div>
+                          )}
                           {/* 键盘焦点指示器 - 仅在未选择时显示 */}
                           {keyboardNav.isKeyboardNavEnabled &&
                             keyboardNav.focusedIndex === index &&
@@ -255,57 +281,15 @@ export function ImageSelector({
 
                 {/* 第二行：分页按钮控制 */}
                 <div className="flex items-center justify-center">
-                  {/* 上一页 */}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={onPrevPage}
-                    disabled={currentPage === 1}
-                    className="mr-6"
-                  >
-                    上一页
-                  </Button>
-
-                  {/* 页码 */}
-                  <div className="flex items-center gap-1 mx-3">
-                    {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                      let pageNum;
-                      if (totalPages <= 5) {
-                        pageNum = i + 1;
-                      } else if (currentPage <= 3) {
-                        pageNum = i + 1;
-                      } else if (currentPage >= totalPages - 2) {
-                        pageNum = totalPages - 4 + i;
-                      } else {
-                        pageNum = currentPage - 2 + i;
-                      }
-
-                      return (
-                        <Button
-                          key={pageNum}
-                          variant={
-                            currentPage === pageNum ? "default" : "outline"
-                          }
-                          size="sm"
-                          onClick={() => onPageClick(pageNum)}
-                          className="w-14 h-8 p-0 min-w-[3.5rem] text-sm font-medium"
-                        >
-                          {pageNum}
-                        </Button>
-                      );
-                    })}
-                  </div>
-
-                  {/* 下一页 */}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={onNextPage}
-                    disabled={currentPage === totalPages}
-                    className="ml-6"
-                  >
-                    下一页
-                  </Button>
+                  <Pagination
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    onPageChange={onPageClick}
+                    maxVisiblePages={5} // 限制页码数量，防止溢出
+                    compact={true} // 使用紧凑模式，因为空间有限
+                    showQuickJumper={totalPages > 10} // 只在页数较多时显示快速跳转
+                    showTotalPages={false} // 在第一行已经显示了总页数信息
+                  />
                 </div>
               </div>
             )}

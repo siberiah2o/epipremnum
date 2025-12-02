@@ -1,7 +1,6 @@
 'use client'
 
 import { useRouteGuard } from "@/hooks/useRouteGuard"
-import Link from 'next/link'
 import { AppSidebar } from "@/components/app-sidebar"
 import {
   Breadcrumb,
@@ -17,9 +16,7 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar"
-import { Button } from "@/components/ui/button"
-import { CategoryManager } from "@/components/media"
-import { FolderOpen, ArrowLeft } from 'lucide-react'
+import { CategoryManagerWithPagination } from "@/components/media"
 
 export default function MediaCategoriesPage() {
   useRouteGuard()
@@ -54,26 +51,7 @@ export default function MediaCategoriesPage() {
           </Breadcrumb>
         </header>
         <div className="flex flex-1 flex-col gap-4 p-4">
-          <div className="flex items-center justify-between">
-            <p className="text-muted-foreground">
-              管理媒体文件的分类，帮助您更好地组织内容
-            </p>
-            <div className="flex gap-2">
-              <Link href="/dashboard/media">
-                <Button variant="outline" className="flex items-center gap-2">
-                  <ArrowLeft className="h-4 w-4" />
-                  返回文件列表
-                </Button>
-              </Link>
-              <Link href="/dashboard/media/upload">
-                <Button variant="outline" className="flex items-center gap-2">
-                  上传文件
-                </Button>
-              </Link>
-            </div>
-          </div>
-
-          <CategoryManager />
+          <CategoryManagerWithPagination />
         </div>
       </SidebarInset>
     </SidebarProvider>

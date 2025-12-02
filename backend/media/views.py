@@ -294,11 +294,33 @@ class CategoryViewSet(viewsets.ModelViewSet):
             raise
 
     def list(self, request, *args, **kwargs):
-        """获取分类列表，返回标准响应格式"""
+        """获取分类列表，返回标准响应格式，支持分页"""
         queryset = self.filter_queryset(self.get_queryset())
-        serializer = self.get_serializer(queryset, many=True)
-        return success_response(
+
+        # 支持搜索
+        search = request.query_params.get('search', None)
+        if search:
+            queryset = queryset.filter(
+                Q(name__icontains=search) |
+                Q(description__icontains=search)
+            )
+
+        # 分页
+        page_size = int(request.query_params.get('page_size', 10))
+        page = int(request.query_params.get('page', 1))
+        start = (page - 1) * page_size
+        end = start + page_size
+
+        total = queryset.count()
+        items = queryset[start:end]
+
+        serializer = self.get_serializer(items, many=True)
+
+        return paginated_response(
             data=serializer.data,
+            count=total,
+            page=page,
+            page_size=page_size,
             message='获取分类列表成功'
         )
 
@@ -358,11 +380,30 @@ class TagViewSet(viewsets.ModelViewSet):
         return Tag.objects.filter(user=self.request.user)
 
     def list(self, request):
-        """获取用户的标签列表"""
+        """获取用户的标签列表，支持分页"""
         queryset = self.get_queryset()
-        serializer = self.get_serializer(queryset, many=True)
-        return success_response(
+
+        # 支持搜索
+        search = request.query_params.get('search', None)
+        if search:
+            queryset = queryset.filter(name__icontains=search)
+
+        # 分页
+        page_size = int(request.query_params.get('page_size', 10))
+        page = int(request.query_params.get('page', 1))
+        start = (page - 1) * page_size
+        end = start + page_size
+
+        total = queryset.count()
+        items = queryset[start:end]
+
+        serializer = self.get_serializer(items, many=True)
+
+        return paginated_response(
             data=serializer.data,
+            count=total,
+            page=page,
+            page_size=page_size,
             message='获取标签列表成功'
         )
 

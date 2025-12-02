@@ -106,8 +106,8 @@ DATABASES = {
         'OPTIONS': {
             'timeout': 120,  # 增加到120秒超时
             'check_same_thread': False,
-            # 针对并发优化的SQLite配置
-            'init_command': "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA cache_size=-256000; PRAGMA temp_store=memory; PRAGMA busy_timeout=120000; PRAGMA wal_autocheckpoint=100; PRAGMA mmap_size=536870912; PRAGMA locking_mode=NORMAL; PRAGMA auto_vacuum=INCREMENTAL; PRAGMA journal_size_limit=134217728; PRAGMA wal_checkpoint_mode=RESTART;",
+            # 针对高并发优化的SQLite配置
+            'init_command': "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA cache_size=-512000; PRAGMA temp_store=memory; PRAGMA busy_timeout=30000; PRAGMA wal_autocheckpoint=200; PRAGMA mmap_size=1073741824; PRAGMA locking_mode=NORMAL; PRAGMA auto_vacuum=INCREMENTAL; PRAGMA journal_size_limit=268435456; PRAGMA wal_checkpoint_mode=RESTART; PRAGMA page_size=4096; PRAGMA foreign_keys=ON; PRAGMA query_only=OFF;",
         }
     }
 }

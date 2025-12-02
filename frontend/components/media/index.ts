@@ -1,8 +1,11 @@
 // Media Management Components
 export { MediaUpload } from './media-upload'
 export { MediaList } from './media-list'
+export { MediaListWithPagination } from './media-list-with-pagination'
 export { MediaListBatch } from './media-list-batch'
 export { MediaEdit } from './media-edit'
 export { CategoryManager } from './category-manager'
+export { CategoryManagerWithPagination } from './category-manager-with-pagination'
 export { TagManager } from './tag-manager'
+export { TagManagerWithPagination } from './tag-manager-with-pagination'
 export { MediaPreviewDialog } from './preview-dialog'

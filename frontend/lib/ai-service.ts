@@ -514,6 +514,8 @@ export class AIManagementService {
       generate_tags?: boolean;
       max_categories?: number;
       max_tags?: number;
+      limited_scenarios?: boolean; // 启用有限场景分析
+      confidence_threshold?: number; // 置信度阈值
     }
   ): Promise<any> {
     // 使用并发管理器执行请求
@@ -530,8 +532,9 @@ export class AIManagementService {
             generate_prompt: options?.generate_prompt ?? false, // 默认不生成prompt以提高速度
             generate_categories: options?.generate_categories ?? true,
             generate_tags: options?.generate_tags ?? true,
-            max_categories: options?.max_categories ?? 5,
-            max_tags: options?.max_tags ?? 10,
+            max_categories: options?.max_categories ?? 3, // 默认减少到3个
+            max_tags: options?.max_tags ?? 5, // 默认减少到5个
+            // 注意：limited_scenarios 和 confidence_threshold 只在前端使用，不发送到后端
           },
         }),
       }

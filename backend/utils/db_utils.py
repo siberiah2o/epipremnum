@@ -6,12 +6,15 @@ from django.db.utils import OperationalError
 from django.core.cache import cache
 import logging
 
+from .connection_pool import connection_pool_manager, managed_connection, optimize_connection_settings
+
 logger = logging.getLogger(__name__)
 
 @contextmanager
 def sqlite_write_tx(db_alias='default', max_retries=8, base_delay=0.002):
     """
     SQLite 写事务上下文管理器，支持自动重试和短事务
+    使用连接池管理数据库连接
 
     Args:
         db_alias: 数据库别名
@@ -24,10 +27,14 @@ def sqlite_write_tx(db_alias='default', max_retries=8, base_delay=0.002):
 
     while retries < max_retries:
         try:
-            conn = connections[db_alias]
-            with transaction.atomic():
-                yield conn
-            return
+            # 使用连接池获取连接
+            with managed_connection(db_alias) as conn:
+                # 优化连接设置
+                optimize_connection_settings(conn)
+
+                with transaction.atomic():
+                    yield conn
+                return
 
         except OperationalError as e:
             current_time = time.time()

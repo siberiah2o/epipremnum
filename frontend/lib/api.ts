@@ -124,6 +124,22 @@ export interface PaginatedMediaList {
   total_pages: number;
 }
 
+export interface PaginatedCategoryList {
+  results: MediaCategory[];
+  count: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+}
+
+export interface PaginatedTagList {
+  results: MediaTag[];
+  count: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+}
+
 export interface CreateCategoryData {
   name: string;
   description: string;
@@ -551,8 +567,21 @@ class ApiClient {
   }
 
   // 获取分类列表
-  async getCategories(): Promise<ApiResponse<MediaCategory[]>> {
-    return this.request<MediaCategory[]>("/api/media/categories/");
+  async getCategories(
+    page: number = 1,
+    pageSize: number = 10,
+    search?: string
+  ): Promise<ApiResponse<PaginatedCategoryList>> {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      page_size: pageSize.toString(),
+    });
+
+    if (search) {
+      params.append('search', search);
+    }
+
+    return this.request<PaginatedCategoryList>(`/api/media/categories/?${params.toString()}`);
   }
 
   // 获取特定分类详情
@@ -589,8 +618,21 @@ class ApiClient {
   }
 
   // 获取标签列表
-  async getTags(): Promise<ApiResponse<MediaTag[]>> {
-    return this.request<MediaTag[]>("/api/media/tags/");
+  async getTags(
+    page: number = 1,
+    pageSize: number = 10,
+    search?: string
+  ): Promise<ApiResponse<PaginatedTagList>> {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      page_size: pageSize.toString(),
+    });
+
+    if (search) {
+      params.append('search', search);
+    }
+
+    return this.request<PaginatedTagList>(`/api/media/tags/?${params.toString()}`);
   }
 
   // 获取特定标签详情
@@ -994,6 +1036,8 @@ class ApiClient {
       generate_tags?: boolean;
       max_categories?: number;
       max_tags?: number;
+      limited_scenarios?: boolean; // 启用有限场景分析
+      confidence_threshold?: number; // 置信度阈值
     }
   ): Promise<ApiResponse<any>> {
     // AI分析使用较短的30秒超时，因为这是创建任务请求
@@ -1010,8 +1054,9 @@ class ApiClient {
             generate_prompt: options?.generate_prompt ?? false, // 默认不生成prompt以提高速度
             generate_categories: options?.generate_categories ?? true,
             generate_tags: options?.generate_tags ?? true,
-            max_categories: options?.max_categories ?? 5,
-            max_tags: options?.max_tags ?? 10,
+            max_categories: options?.max_categories ?? 3, // 默认减少到3个
+            max_tags: options?.max_tags ?? 5, // 默认减少到5个
+            // 注意：limited_scenarios 和 confidence_threshold 只在前端使用，不发送到后端
           },
         }),
       },

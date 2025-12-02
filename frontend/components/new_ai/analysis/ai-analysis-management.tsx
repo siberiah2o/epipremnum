@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { useAIModels } from "../hooks/use-ai-models";
+import { getSortedVisionModels } from "@/lib/model-utils";
 import { ImageSelector } from "./components/image-selector";
 import { AnalysisResults } from "./components/analysis-results";
 import { useMediaFiles } from "./hooks/use-media-files";
@@ -37,14 +38,17 @@ export function AIAnalysisManagement({
   // AI 模型相关
   const { models, loading: modelsLoading } = useAIModels();
 
-  // 过滤出可用的视觉模型
+  // 使用工具函数获取排序后的视觉模型
   const visionModels = useMemo(
-    () => models.filter((model) => model.is_vision_capable && model.is_active),
+    () => getSortedVisionModels(models),
     [models]
   );
 
   // 自动选择默认模型，如果没有默认模型则选择第一个视觉模型
   const [selectedModel, setSelectedModel] = useState<string>("");
+  const [isLoadingDetails, setIsLoadingDetails] = useState(false);
+  const [loadingFileId, setLoadingFileId] = useState<number | null>(null);
+
   useEffect(() => {
     if (visionModels.length > 0 && !selectedModel) {
       // 优先选择默认模型，如果没有默认模型则选择第一个视觉模型
@@ -83,18 +87,31 @@ export function AIAnalysisManagement({
 
   // 处理文件选择
   const handleFileSelect = async (file: MediaFile, index: number) => {
-    setSelectedFile(file);
     keyboardNav.setFocusedIndex(index);
     keyboardNav.setKeyboardNavEnabled(true);
 
-    // 自动加载图片详细信息
+    // 设置加载状态
+    setIsLoadingDetails(true);
+    setLoadingFileId(file.id);
+
     try {
+      console.log(`🔍 [UI] 开始选择图片: ${file.id} - ${file.title}`);
       const updatedFile = await fetchMediaFileDetails(file.id);
       if (updatedFile) {
+        console.log(`🔍 [UI] 图片详情加载完成，设置选中状态`);
         setSelectedFile(updatedFile);
+      } else {
+        // 如果没有获取到详细信息，使用原始文件数据
+        console.log(`🔍 [UI] 未获取到详细信息，使用原始数据`);
+        setSelectedFile(file);
       }
     } catch (error) {
       console.error("加载图片详情失败:", error);
+      // 出错时使用原始文件数据
+      setSelectedFile(file);
+    } finally {
+      setIsLoadingDetails(false);
+      setLoadingFileId(null);
     }
   };
 
@@ -217,6 +234,8 @@ export function AIAnalysisManagement({
             onNextPage={handleNextPageWithReset}
             onPageClick={handlePageClickWithReset}
             setKeyboardNavEnabled={keyboardNav.setKeyboardNavEnabled}
+            isLoadingDetails={isLoadingDetails}
+            loadingFileId={loadingFileId}
           />
         </div>
 

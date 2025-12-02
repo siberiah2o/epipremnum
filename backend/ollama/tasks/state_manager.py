@@ -12,6 +12,8 @@ from django.db.models import F, Q
 from django.core.cache import cache
 from django.utils import timezone
 
+from utils.request_queue import throttle_db_write
+
 logger = logging.getLogger(__name__)
 
 
@@ -20,22 +22,31 @@ class StateManager:
 
     def __init__(self):
         self.cache_timeout = 30  # 30秒缓存超时，提高实时性
-        self.max_retries = 3  # 最大重试次数
-        self.base_delay = 0.1  # 基础延迟时间（秒）
+        self.max_retries = 5  # 增加最大重试次数，应对高并发
+        self.base_delay = 0.05  # 减少基础延迟时间，加快重试
+        self.max_total_delay = 5.0  # 最大总延迟时间（秒）
 
     def _retry_with_backoff(self, func, *args, **kwargs):
         """
         带指数退避的重试机制
         主要用于处理数据库锁定问题
         """
+        total_delay = 0
         for attempt in range(self.max_retries + 1):
             try:
                 return func(*args, **kwargs)
             except DatabaseError as e:
                 if "database is locked" in str(e).lower() and attempt < self.max_retries:
                     # 指数退避 + 随机抖动，避免惊群效应
-                    delay = self.base_delay * (2 ** attempt) + random.uniform(0, 0.1)
-                    logger.warning(f"🔄 数据库锁定，第 {attempt + 1} 次重试，等待 {delay:.2f}s: {str(e)}")
+                    delay = self.base_delay * (2 ** attempt) + random.uniform(0, 0.05)
+
+                    # 检查总延迟时间是否超过限制
+                    if total_delay + delay > self.max_total_delay:
+                        logger.error(f"❌ 数据库锁定重试超时，总延迟 {total_delay:.2f}s 超过限制 {self.max_total_delay}s")
+                        raise
+
+                    total_delay += delay
+                    logger.warning(f"🔄 数据库锁定，第 {attempt + 1} 次重试，等待 {delay:.2f}s (累计 {total_delay:.2f}s): {str(e)}")
                     time.sleep(delay)
                     continue
                 else:
@@ -46,40 +57,47 @@ class StateManager:
                 # 非数据库错误，直接抛出
                 raise
 
-    @transaction.atomic
+    @throttle_db_write
     def create_analysis_safely(self, media, model, analysis_options, prompt=None):
-        """原子性创建分析任务"""
+        """原子性创建分析任务（带重试机制和限流，优化锁竞争）"""
         from ..models import OllamaImageAnalysis
 
-        # 使用 select_for_update 防止竞态条件
-        media_lock = media.__class__.objects.select_for_update().get(id=media.id)
+        def _do_create():
+            with transaction.atomic():
+                # 优化：先检查是否存在进行中的任务，避免不必要的锁
+                # 使用更宽松的查询条件，减少锁竞争
+                existing_analysis = OllamaImageAnalysis.objects.filter(
+                    media=media,
+                    model=model,
+                    analysis_options=analysis_options,
+                    status__in=['pending', 'processing']  # 只检查进行中的任务
+                ).first()
 
-        # 检查是否已有进行中的任务（允许重复分析已完成任务）
-        existing_analysis = OllamaImageAnalysis.objects.filter(
-            media=media_lock,
-            model=model,
-            analysis_options=analysis_options,
-            status__in=['pending', 'processing']  # 只检查进行中的任务
-        ).select_for_update().first()
+                if existing_analysis:
+                    logger.info(f"发现已有进行中的分析任务: {existing_analysis.id}")
+                    return existing_analysis, False  # 返回现有任务， False表示未创建新任务
 
-        if existing_analysis:
-            logger.info(f"发现已有进行中的分析任务: {existing_analysis.id}")
-            return existing_analysis, False  # 返回现有任务， False表示未创建新任务
+                # 原子性创建新任务
+                analysis = OllamaImageAnalysis.objects.create(
+                    media=media,
+                    model=model,
+                    analysis_options=analysis_options,
+                    prompt=prompt,
+                    status='pending'  # 确保初始状态正确
+                )
 
-        # 原子性创建新任务
-        analysis = OllamaImageAnalysis.objects.create(
-            media=media_lock,
-            model=model,
-            analysis_options=analysis_options,
-            prompt=prompt,
-            status='pending'  # 确保初始状态正确
-        )
+                logger.info(f"✅ 原子性创建分析任务: {analysis.id}")
+                return analysis, True  # 返回新创建的任务， True表示创建了新任务
 
-        logger.info(f"✅ 原子性创建分析任务: {analysis.id}")
-        return analysis, True  # 返回新创建的任务， True表示创建了新任务
+        try:
+            return self._retry_with_backoff(_do_create)
+        except Exception as e:
+            logger.error(f"❌ 创建分析任务失败: {str(e)}")
+            raise
 
+    @throttle_db_write
     def update_analysis_status(self, analysis_id: int, from_status: Optional[str], to_status: str, **kwargs) -> bool:
-        """原子性更新分析状态（带重试机制）"""
+        """原子性更新分析状态（带重试机制和限流）"""
         from ..models import OllamaImageAnalysis
 
         def _do_update():
@@ -164,8 +182,9 @@ class StateManager:
             logger.error(f"❌ 状态更新失败: analysis_id={analysis_id}, error={str(e)}")
             return False
 
+    @throttle_db_write
     def batch_update_status(self, analysis_ids: List[int], from_status: Optional[str], to_status: str, **kwargs) -> Dict[str, int]:
-        """批量原子性更新状态（带重试机制）"""
+        """批量原子性更新状态（带重试机制和限流）"""
         from ..models import OllamaImageAnalysis
 
         def _do_batch_update():
@@ -309,8 +328,9 @@ class StateManager:
             logger.error(f"❌ 更新重试次数失败: analysis_id={analysis_id}, error={str(e)}")
             return False
 
+    @throttle_db_write
     def update_media_with_analysis_result(self, analysis, result: Dict[str, Any]) -> bool:
-        """原子性更新媒体分析结果（使用重试机制）"""
+        """原子性更新媒体分析结果（使用重试机制和限流）"""
         from media.models import Media, Category, Tag
 
         def _do_update():

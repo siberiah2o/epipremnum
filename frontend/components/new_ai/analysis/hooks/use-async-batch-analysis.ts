@@ -97,6 +97,8 @@ export function useAsyncBatchAnalysis() {
       generate_tags?: boolean;
       max_categories?: number;
       max_tags?: number;
+      limited_scenarios?: boolean; // 启用有限场景分析
+      confidence_threshold?: number; // 置信度阈值
     } = {},
     concurrencyLimit: number = 1,
     onJobComplete?: (successCount: number, failedCount: number) => void,
@@ -162,7 +164,17 @@ export function useAsyncBatchAnalysis() {
           const response = await apiClient.analyzeSingle(
             file.id,
             modelName,
-            options
+            {
+              generate_title: options.generate_title ?? true,
+              generate_description: options.generate_description ?? true,
+              generate_prompt: options.generate_prompt ?? false,
+              generate_categories: options.generate_categories ?? true,
+              generate_tags: options.generate_tags ?? true,
+              max_categories: options.max_categories ?? 3, // 减少默认数量
+              max_tags: options.max_tags ?? 5, // 减少默认数量
+              limited_scenarios: options.limited_scenarios ?? true, // 启用有限场景
+              confidence_threshold: options.confidence_threshold ?? 0.7, // 置信度阈值
+            }
           );
 
           // 处理新的API响应格式: {code, message, data: {analysis_id, task_id, status, media_info}}

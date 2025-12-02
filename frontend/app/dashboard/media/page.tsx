@@ -17,7 +17,7 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar"
-import { MediaList, MediaEdit, MediaPreviewDialog } from "@/components/media"
+import { MediaListWithPagination, MediaEdit, MediaPreviewDialog } from "@/components/media"
 import { MediaListItem } from "@/lib/api"
 import { useMediaList } from '@/hooks/use-media'
 import { toast } from 'sonner'
@@ -93,7 +93,7 @@ export default function MediaPage() {
               onSuccess={handleEditSuccess}
             />
           ) : (
-            <MediaList
+            <MediaListWithPagination
               onEdit={handleEdit}
               onView={handleView}
             />

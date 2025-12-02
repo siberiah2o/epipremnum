@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { useAIModels } from "../../hooks/use-ai-models";
 import { useAsyncAIAnalysis } from "../hooks/use-async-ai-analysis";
+import { getSortedVisionModels } from "@/lib/model-utils";
 import type { MediaFile } from "../types/analysis";
 
 interface NewAnalysisPanelProps {
@@ -132,22 +133,37 @@ const CompactTagsDisplay = React.memo(
 
 CompactTagsDisplay.displayName = "CompactTagsDisplay";
 
-// 组件：图片信息面板
-const ImageInfoPanel = ({ selectedFile }: { selectedFile: MediaFile }) => {
+// 组件：图片信息面板（包含AI分析控制）
+const ImageInfoPanel = ({
+  selectedFile,
+  models,
+  visionModels,
+  selectedModel,
+  setSelectedModel,
+  analyzing,
+  isCurrentlyAnalyzing,
+  currentAnalysisStatus,
+  analysisProgress,
+  onAnalysis
+}: {
+  selectedFile: MediaFile;
+  models: any[];
+  visionModels: any[];
+  selectedModel: string;
+  setSelectedModel: (model: string) => void;
+  analyzing: boolean;
+  isCurrentlyAnalyzing: boolean;
+  currentAnalysisStatus: any;
+  analysisProgress: number;
+  onAnalysis: () => void;
+}) => {
   // 安全地获取分类和标签数据
   const categories = selectedFile.ai_categories || [];
   const tags = selectedFile.ai_tags || [];
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Eye className="h-5 w-5" />
-          图片信息
-        </CardTitle>
-        <CardDescription>当前选中图片的基本信息和预览</CardDescription>
-      </CardHeader>
-      <CardContent>
+      <CardContent className="pt-6">
         <div className="flex flex-col lg:flex-row gap-6">
           <div className="flex-shrink-0">
             <img
@@ -178,6 +194,7 @@ const ImageInfoPanel = ({ selectedFile }: { selectedFile: MediaFile }) => {
               </div>
             </div>
           </div>
+
           <div className="flex-1 space-y-4">
             <div className="flex items-center gap-2">
               <h3 className="font-semibold text-lg">{selectedFile.title}</h3>
@@ -306,6 +323,75 @@ const ImageInfoPanel = ({ selectedFile }: { selectedFile: MediaFile }) => {
             )}
           </div>
         </div>
+
+        {/* AI 分析控制模块 */}
+        <div className="mt-6 pt-6 border-t">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* 模型选择 */}
+            <div>
+              <label className="text-sm font-medium mb-4 block">选择AI模型</label>
+              <select
+                value={selectedModel}
+                onChange={(e) => setSelectedModel(e.target.value)}
+                className="w-full p-2 border rounded-md text-sm bg-white"
+                disabled={analyzing}
+              >
+                <option value="">请选择模型</option>
+                {visionModels.map((model, index) => (
+                  <option
+                    key={`model-${model.id || model.name}-${
+                      model.endpoint_id || "default"
+                    }-${index}`}
+                    value={model.name}
+                  >
+                    {model.name} ({model.model_size})
+                  </option>
+                ))}
+                {models.length === 0 && visionModels.length === 0 && (
+                  <option value="" disabled>
+                    没有获取到模型数据，请检查API连接
+                  </option>
+                )}
+                {models.length > 0 && visionModels.length === 0 && (
+                  <option value="" disabled>
+                    默认端点没有可用的活跃视觉模型，请在AI管理中检查
+                  </option>
+                )}
+              </select>
+            </div>
+
+            {/* 操作按钮 */}
+            <div className="flex gap-2 items-end">
+              <Button
+                onClick={onAnalysis}
+                disabled={
+                  isCurrentlyAnalyzing ||
+                  !selectedModel ||
+                  currentAnalysisStatus?.status === "processing"
+                }
+                className="flex items-center gap-2 text-sm flex-1"
+              >
+                {isCurrentlyAnalyzing ||
+                currentAnalysisStatus?.status === "processing" ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    正在分析中...
+                    {analysisProgress > 0 && (
+                      <span className="text-xs font-semibold text-blue-600">
+                        {analysisProgress}%
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="h-4 w-4" />
+                    开始分析
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        </div>
       </CardContent>
     </Card>
   );
@@ -325,18 +411,21 @@ export function NewAnalysisPanel({
     setAnalysisError,
   } = useAsyncAIAnalysis();
 
-  // 后端API已经返回默认端点的模型，直接使用所有视觉模型
-  const visionModels = models.filter(
-    (model) => model.is_vision_capable && model.is_active
-  );
+  // 使用工具函数获取排序后的视觉模型
+  const visionModels = getSortedVisionModels(models);
 
   // 调试信息 - 使用延迟输出避免被其他日志覆盖
   if (process.env.NODE_ENV === "development") {
     setTimeout(() => {
-      console.group("🔍 [DEBUG] 模型状态（默认端点）");
+      console.group("🔍 [DEBUG] 模型状态（默认端点 - 已排序）");
       console.log("总模型数量:", models.length);
-      console.log("视觉模型数量:", visionModels.length);
-      console.table(models);
+      console.log("排序后视觉模型数量:", visionModels.length);
+      console.log("排序后的视觉模型:");
+      visionModels.forEach((model, index) => {
+        const isQwen3 = model.name.toLowerCase().includes('qwen3');
+        const isDefault = model.is_default ? '[默认]' : '';
+        console.log(`${index + 1}. ${model.name} (${model.model_size}) ${isQwen3 ? '[Qwen3优先]' : ''} ${isDefault}`);
+      });
       console.groupEnd();
     }, 100);
   }
@@ -441,185 +530,48 @@ export function NewAnalysisPanel({
 
   return (
     <div className="space-y-6 h-full overflow-y-auto">
-      {/* 图片信息面板 */}
-      <ImageInfoPanel selectedFile={selectedFile} />
+      {/* 图片信息面板（包含AI分析控制） */}
+      <ImageInfoPanel
+        selectedFile={selectedFile}
+        models={models}
+        visionModels={visionModels}
+        selectedModel={selectedModel}
+        setSelectedModel={setSelectedModel}
+        analyzing={analyzing}
+        isCurrentlyAnalyzing={isCurrentlyAnalyzing}
+        currentAnalysisStatus={currentAnalysisStatus}
+        analysisProgress={analysisProgress}
+        onAnalysis={handleAnalysis}
+      />
 
-      {/* AI 分析控制面板 */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* 左列：AI 分析控制 */}
+      {/* 模型刷新按钮 - 只在没有模型时显示 */}
+      {models.length === 0 && !modelsLoading && (
         <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2">
-              <Brain className="h-5 w-5" />
-              AI 分析控制
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {/* 模型选择 */}
-            <div className="space-y-1">
-              <label className="text-sm font-medium">选择AI模型</label>
-              <select
-                value={selectedModel}
-                onChange={(e) => setSelectedModel(e.target.value)}
-                className="w-full p-2 border rounded-md text-sm bg-white"
-                disabled={analyzing}
-              >
-                <option value="">请选择模型</option>
-                {visionModels.map((model, index) => (
-                  <option
-                    key={`model-${model.id || model.name}-${
-                      model.endpoint_id || "default"
-                    }-${index}`}
-                    value={model.name}
-                  >
-                    {model.name} ({model.model_size})
-                  </option>
-                ))}
-                {modelsLoading ? (
-                  <option value="" disabled>
-                    正在加载模型...
-                  </option>
-                ) : visionModels.length === 0 ? (
-                  <option value="" disabled>
-                    {models.length === 0
-                      ? "没有获取到模型数据，请检查API连接"
-                      : "默认端点没有可用的活跃视觉模型，请在AI管理中检查"}
-                  </option>
-                ) : null}
-              </select>
-            </div>
-
-            {/* 操作按钮 */}
-            <div className="flex gap-2 flex-wrap">
+          <CardContent className="pt-6">
+            <div className="flex justify-center">
               <Button
-                onClick={handleAnalysis}
-                disabled={
-                  isCurrentlyAnalyzing ||
-                  !selectedModel ||
-                  currentAnalysisStatus?.status === "processing"
-                }
-                className="flex items-center gap-2 text-sm"
+                onClick={() => {
+                  console.log("🔍 [DEBUG] 手动刷新模型数据");
+                  refreshModels();
+                }}
+                variant="outline"
+                size="sm"
+                className="text-sm"
               >
-                {isCurrentlyAnalyzing ||
-                currentAnalysisStatus?.status === "processing" ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    正在分析中...
-                    {analysisProgress > 0 && (
-                      <span className="text-xs font-semibold text-blue-600">
-                        {analysisProgress}%
-                      </span>
-                    )}
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="h-4 w-4" />
-                    开始分析
-                  </>
-                )}
+                刷新模型数据
               </Button>
-
-              {/* 模型刷新按钮 */}
-              {models.length === 0 && !modelsLoading && (
-                <Button
-                  onClick={() => {
-                    console.log("🔍 [DEBUG] 手动刷新模型数据");
-                    refreshModels();
-                  }}
-                  variant="outline"
-                  size="sm"
-                  className="text-xs"
-                >
-                  刷新模型
-                </Button>
-              )}
-            </div>
-
-            {analysisError && (
-              <Alert variant="destructive" className="mt-4">
-                <AlertCircle className="h-4 w-4" />
-                <AlertDescription>{analysisError}</AlertDescription>
-              </Alert>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* 右列：分析状态 */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Brain className="h-4 w-4" />
-              分析状态
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <div className="grid grid-cols-1 gap-2 text-sm">
-              <div>
-                <span className="font-medium">分析状态：</span>
-                <span className="text-muted-foreground ml-1">
-                  {(() => {
-                    // 检查是否有AI分析结果 - 只要有任何一个AI字段有值就认为是已分析
-                    const hasDescription = !!selectedFile.ai_description;
-                    const hasPrompt = !!selectedFile.ai_prompt;
-                    const hasCategories =
-                      selectedFile.ai_categories &&
-                      selectedFile.ai_categories.length > 0;
-                    const hasTags =
-                      selectedFile.ai_tags && selectedFile.ai_tags.length > 0;
-                    const hasAnalyzedAt = !!selectedFile.ai_analyzed_at;
-
-                    const hasAIResults =
-                      hasDescription ||
-                      hasPrompt ||
-                      hasCategories ||
-                      hasTags ||
-                      hasAnalyzedAt;
-
-                    // 开发环境调试信息
-                    if (process.env.NODE_ENV === "development") {
-                      console.log(
-                        `🔍 [DEBUG] 文件 ${selectedFile.id} 分析状态:`,
-                        {
-                          hasAIResults,
-                          hasAnalyzedAt,
-                          hasDescription,
-                          hasPrompt,
-                          hasCategories,
-                          hasTags,
-                          ai_analyzed_at: selectedFile.ai_analyzed_at,
-                          description_length:
-                            selectedFile.ai_description?.length,
-                          prompt_length: selectedFile.ai_prompt?.length,
-                          categories_count: selectedFile.ai_categories?.length,
-                          tags_count: selectedFile.ai_tags?.length,
-                        }
-                      );
-                    }
-
-                    return hasAIResults ? "已分析" : "未分析";
-                  })()}
-                </span>
-              </div>
-              {selectedFile.ai_analyzed_at &&
-                (selectedFile.ai_description ||
-                  selectedFile.ai_prompt ||
-                  (selectedFile.ai_categories &&
-                    selectedFile.ai_categories.length > 0) ||
-                  (selectedFile.ai_tags &&
-                    selectedFile.ai_tags.length > 0)) && (
-                  <div>
-                    <span className="font-medium">分析时间：</span>
-                    <span className="text-muted-foreground ml-1">
-                      {new Date(selectedFile.ai_analyzed_at).toLocaleString(
-                        "zh-CN"
-                      )}
-                    </span>
-                  </div>
-                )}
             </div>
           </CardContent>
         </Card>
-      </div>
+      )}
+
+      {/* 错误提示 */}
+      {analysisError && (
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription>{analysisError}</AlertDescription>
+        </Alert>
+      )}
     </div>
   );
 }

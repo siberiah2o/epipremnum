@@ -215,15 +215,16 @@ export function useSyncBatchAnalysis() {
           const response = await apiClient.analyzeSingle(
             file.id,
             modelName,
-            true,
             {
               generate_title: options.generate_title ?? true,
               generate_description: options.generate_description ?? true,
               generate_prompt: options.generate_prompt ?? false,
               generate_categories: options.generate_categories ?? true,
               generate_tags: options.generate_tags ?? true,
-              max_categories: options.max_categories ?? 5,
-              max_tags: options.max_tags ?? 10,
+              max_categories: options.max_categories ?? 3, // 减少默认数量
+              max_tags: options.max_tags ?? 5, // 减少默认数量
+              limited_scenarios: options.limited_scenarios ?? true, // 启用有限场景
+              confidence_threshold: options.confidence_threshold ?? 0.7, // 置信度阈值
             }
           );
 

@@ -5,6 +5,7 @@
 
 import logging
 import time
+import random
 from typing import Dict, Any, List, Tuple
 from django.db import transaction
 from django.utils import timezone
@@ -92,18 +93,18 @@ class BatchHandler:
 
         return errors
 
-    @transaction.atomic
     def prepare_tasks(self, user, media_ids: List[int], model_name: str = None,
                      analysis_options: Dict[str, Any] = None) -> Tuple[List, List, Dict[str, Any]]:
-        """准备批量任务（原子性操作）"""
+        """准备批量任务（优化版，减少数据库锁持有时间）"""
         from media.models import Media
         from ..models import OllamaAIModel, OllamaImageAnalysis
+        from .state_manager import state_manager
 
         valid_tasks = []
         validation_errors = []
 
         try:
-            # 验证并获取媒体文件
+            # 第一步：验证媒体文件（只读操作，不需要事务）
             valid_media_items = []
             for media_id in media_ids:
                 try:
@@ -118,35 +119,41 @@ class BatchHandler:
             # 即使没有有效媒体文件，也继续处理，让视图层能够返回包含跳过项的响应
             # 这样可以保持API响应格式的一致性
 
-            # 获取或验证模型
+            # 第二步：获取或验证模型（只读操作）
             model = self._get_or_validate_model(user, model_name)
             if not model:
                 raise BatchValidationError("没有可用的分析模型")
 
-            # 为每个媒体文件创建分析任务 - 允许重复任务
-            for media in valid_media_items:
+            # 第三步：为每个媒体文件创建分析任务 - 使用状态管理器的原子操作
+            # 每个任务独立创建，减少锁竞争，添加微小延迟避免同时创建大量任务
+            for index, media in enumerate(valid_media_items):
                 try:
-                    # 直接创建新的分析任务，不检查重复
-                    # 每次批量分析都应该创建新的异步任务
-                    analysis = OllamaImageAnalysis.objects.create(
+                    # 添加微小随机延迟，避免同时创建大量任务导致的锁竞争
+                    if index > 0 and index % 5 == 0:
+                        delay = random.uniform(0.001, 0.005)
+                        time.sleep(delay)
+
+                    # 使用状态管理器创建分析任务，每个任务独立事务
+                    analysis, created = state_manager.create_analysis_safely(
                         media=media,
                         model=model,
                         analysis_options=analysis_options or {},
-                        prompt=None,
-                        status='pending'
+                        prompt=None
                     )
 
-                    valid_tasks.append(analysis)
-                    logger.info(f"✅ 创建分析任务: media_id={media.id}, analysis_id={analysis.id}")
+                    if created:
+                        valid_tasks.append(analysis)
+                        logger.info(f"✅ 创建分析任务: media_id={media.id}, analysis_id={analysis.id}")
+                    else:
+                        # 如果任务已存在，也添加到有效任务列表中
+                        valid_tasks.append(analysis)
+                        logger.info(f"📝 使用现有分析任务: media_id={media.id}, analysis_id={analysis.id}")
 
                 except Exception as e:
                     validation_errors.append({
                         'media_id': media.id,
                         'error': f"创建分析任务失败: {str(e)}"
                     })
-
-            # 注意：移除了skipped_items处理，因为现在允许重复任务
-            # 每个媒体文件都会创建新的分析任务
 
             summary = {
                 'total_requested': len(media_ids),
