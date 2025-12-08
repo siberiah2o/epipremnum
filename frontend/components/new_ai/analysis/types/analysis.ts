@@ -1,7 +1,6 @@
 // 扩展 MediaListItem 类型，添加AI相关字段
 export type MediaFile = import("@/lib/api").MediaListItem & {
   ai_description?: string | null;
-  ai_prompt?: string | null;
   ai_categories?: Array<{ id: number; name: string }> | null;
   ai_tags?: Array<{ id: number; name: string }> | null;
   ai_analyzed_at?: string | null;
@@ -29,7 +28,6 @@ export interface AnalysisState {
 export interface AIAnalysisOptions {
   generate_title?: boolean;
   generate_description?: boolean;
-  generate_prompt?: boolean;
   generate_categories?: boolean;
   generate_tags?: boolean;
   max_categories?: number;

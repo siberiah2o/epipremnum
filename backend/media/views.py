@@ -64,8 +64,7 @@ class MediaViewSet(viewsets.GenericViewSet):
         if search:
             queryset = queryset.filter(
                 Q(title__icontains=search) |
-                Q(description__icontains=search) |
-                Q(prompt__icontains=search)
+                Q(description__icontains=search)
             )
         
         # 分页

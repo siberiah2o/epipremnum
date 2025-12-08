@@ -64,40 +64,40 @@ class BatchAnalysisHandler(BaseViewSetMixin):
     def batch_cancel(self):
         """批量取消任务接口"""
         from ..models import OllamaImageAnalysis
-        from ..tasks.task_workers import cancel_batch_tasks_task
+        from ..tasks.state_manager import state_manager
+        from ..tasks.task_workers import cancel_all_user_tasks_task
 
         analysis_ids = self.request.data.get('analysis_ids', [])
-        task_ids = self.request.data.get('task_ids', [])
 
         # 验证输入参数
-        if not analysis_ids and not task_ids:
+        if not analysis_ids:
             return BaseResponseHandler.error_response(
-                message='必须提供 analysis_ids 或 task_ids 参数'
+                message='必须提供 analysis_ids 参数'
             )
 
-        # 启动异步批量取消任务
+        # 立即更新数据库状态
         try:
-            task = cancel_batch_tasks_task.run_async(
-                user_id=self.request.user.id,
-                analysis_ids=analysis_ids if analysis_ids else None,
-                task_ids=task_ids if task_ids else None
+            update_result = state_manager.batch_update_status(
+                analysis_ids=analysis_ids,
+                from_status=['pending', 'processing'],
+                to_status='cancelled',
+                error_message='用户批量取消'
             )
 
-            logger.info(f"启动批量取消任务: task_id={task.id}")
+            logger.info(f"批量取消任务: 成功 {update_result['success_count']}/{len(analysis_ids)} 个")
 
             return BaseResponseHandler.success_response(
-                message='批量取消任务已启动',
+                message=f'批量取消成功: {update_result["success_count"]} 个任务',
                 data={
-                    'task_id': str(task.id),
-                    'cancel_method': 'task_ids' if task_ids else 'analysis_ids',
-                    'target_count': len(task_ids) if task_ids else len(analysis_ids)
+                    'cancelled_count': update_result['success_count'],
+                    'failed_count': update_result['error_count']
                 }
             )
 
         except Exception as e:
-            logger.error(f"启动批量取消任务失败: {str(e)}")
+            logger.error(f"批量取消任务失败: {str(e)}")
             return BaseResponseHandler.error_response(
-                message=f'启动批量取消任务失败: {str(e)}'
+                message=f'批量取消失败: {str(e)}'
             )
 
     def batch_query(self):

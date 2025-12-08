@@ -201,7 +201,6 @@ const ImageInfoPanel = ({
               {(() => {
                 // 使用与分析状态面板相同的判断逻辑
                 const hasDescription = !!selectedFile.ai_description;
-                const hasPrompt = !!selectedFile.ai_prompt;
                 const hasCategories =
                   selectedFile.ai_categories &&
                   selectedFile.ai_categories.length > 0;
@@ -211,7 +210,6 @@ const ImageInfoPanel = ({
 
                 const hasAIResults =
                   hasDescription ||
-                  hasPrompt ||
                   hasCategories ||
                   hasTags ||
                   hasAnalyzedAt;
@@ -229,11 +227,9 @@ const ImageInfoPanel = ({
               })()}
             </div>
 
-            {/* 描述和提示词左右布局 */}
-            {(selectedFile.description ||
-              selectedFile.ai_description ||
-              selectedFile.ai_prompt) && (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* 描述 */}
+            {(selectedFile.description || selectedFile.ai_description) && (
+              <div className="grid grid-cols-1 gap-4">
                 {(selectedFile.description || selectedFile.ai_description) && (
                   <div>
                     <h4 className="font-medium text-sm mb-2 flex items-center gap-2">
@@ -271,32 +267,7 @@ const ImageInfoPanel = ({
                   </div>
                 )}
 
-                {selectedFile.ai_prompt && (
-                  <div>
-                    <h4 className="font-medium text-sm mb-2 flex items-center gap-2">
-                      <Wand2 className="h-3 w-3" />
-                      AI绘画提示词
-                    </h4>
-                    <div className="relative">
-                      <button
-                        onClick={() => {
-                          copyToClipboard(
-                            selectedFile.ai_prompt!,
-                            "AI绘画提示词已复制到剪贴板"
-                          );
-                        }}
-                        className="absolute top-2 right-2 p-1.5 rounded-md bg-background/80 hover:bg-background border shadow-sm transition-colors"
-                        title="复制AI绘画提示词"
-                      >
-                        <Copy className="h-3 w-3" />
-                      </button>
-                      <div className="text-sm text-muted-foreground font-mono bg-muted p-3 rounded-lg break-words leading-relaxed max-h-32 overflow-y-auto pr-10">
-                        {selectedFile.ai_prompt}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
+                              </div>
             )}
 
             {/* 推荐分类和标签 */}
@@ -480,7 +451,6 @@ export function NewAnalysisPanel({
       {
         generate_title: true,
         generate_description: true,
-        generate_prompt: true,
         generate_categories: true,
         generate_tags: true,
         max_categories: 5,

@@ -181,7 +181,6 @@ export function MediaUpload() {
         file: file,
         title: fileTitle,
         description: '',
-        prompt: '',
         category_ids: [],
         tag_ids: []
       }

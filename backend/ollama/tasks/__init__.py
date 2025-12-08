@@ -5,10 +5,9 @@ Ollama图片分析任务模块
 
 # 导入核心类和实例
 from .prompt_templates import PromptTemplates, TaskConfig
-from .task_workers import analyze_image_task, cancel_analysis_task, analyze_batch_task, cancel_batch_tasks_task, cancel_all_user_tasks_task
+from .task_workers import analyze_image_task, cancel_analysis_task, analyze_batch_task, cancel_all_user_tasks_task
 from .state_manager import state_manager
 from .batch_handler import batch_handler
-from .task_cancellation import cancellation_manager, TaskCancelledException, CancellableTask
 from .concurrency_manager import concurrency_manager
 from .ollama_client import OllamaImageAnalyzer
 from .task_service import task_service
@@ -22,14 +21,9 @@ __all__ = [
     'analyze_image_task',
     'cancel_analysis_task',
     'analyze_batch_task',
-    'cancel_batch_tasks_task',
     'cancel_all_user_tasks_task',
     'state_manager',
     'batch_handler',
-    'analyze_images_with_concurrency_task',
-    'cancellation_manager',
-    'TaskCancelledException',
-    'CancellableTask',
     'concurrency_manager',
     'OllamaImageAnalyzer',
     'task_service',

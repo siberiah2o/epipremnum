@@ -30,6 +30,7 @@ class PromptTemplates:
 
 请直接返回描述内容，不需要其他说明。"""
 
+  
     @staticmethod
     def categories_prompt(max_categories):
         """生成分类分析的提示词"""
@@ -54,18 +55,7 @@ class PromptTemplates:
 
 请用逗号分隔返回标签列表，例如：山水, 日落, 橙色, 宁静"""
 
-    @staticmethod
-    def ai_prompt_prompt():
-        """生成AI绘画提示词的提示词"""
-        return """请为这张图片生成适合AI绘画的提示词。
-要求：
-- 描述如何重现类似这张图片的AI绘画
-- 包含风格、构图、色彩、主体等要素
-- 使用中文描述关键词，符合AI绘画工具的习惯
-- 符合QwenImage、Flux、即梦、可灵等AI绘画工具的提示词生成习惯
-
-请直接返回AI绘画提示词，不需要其他说明。"""
-
+    
     @staticmethod
     def default_tags_prompt():
         """生成默认标签分析提示词（用于默认分析）"""
@@ -90,7 +80,7 @@ class TaskConfig:
             'default_max': None
         },
         'description': {
-            'name': '描述生成',
+            'name': 'AI描述生成',
             'prompt_method': PromptTemplates.description_prompt,
             'default_max': None
         },
@@ -103,11 +93,6 @@ class TaskConfig:
             'name': '标签生成',
             'prompt_method': PromptTemplates.tags_prompt,
             'default_max': 10
-        },
-        'prompt': {
-            'name': 'AI绘画提示词',
-            'prompt_method': PromptTemplates.ai_prompt_prompt,
-            'default_max': None
         }
     }
 

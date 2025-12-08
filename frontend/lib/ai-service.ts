@@ -105,7 +105,6 @@ export interface AnalysisDetail {
   model_used: string;
   title?: string;
   description?: string;
-  prompt?: string;
   suggested_categories_data?: Array<{
     id: number;
     name: string;
@@ -127,7 +126,6 @@ export interface CreateAnalysisRequest {
   options?: {
     generate_title?: boolean;
     generate_description?: boolean;
-    generate_prompt?: boolean;
     generate_categories?: boolean;
     generate_tags?: boolean;
     max_categories?: number;
@@ -509,7 +507,6 @@ export class AIManagementService {
     options?: {
       generate_title?: boolean;
       generate_description?: boolean;
-      generate_prompt?: boolean;
       generate_categories?: boolean;
       generate_tags?: boolean;
       max_categories?: number;
@@ -529,7 +526,6 @@ export class AIManagementService {
           options: {
             generate_title: options?.generate_title ?? true,
             generate_description: options?.generate_description ?? true,
-            generate_prompt: options?.generate_prompt ?? false, // 默认不生成prompt以提高速度
             generate_categories: options?.generate_categories ?? true,
             generate_tags: options?.generate_tags ?? true,
             max_categories: options?.max_categories ?? 3, // 默认减少到3个
@@ -664,7 +660,6 @@ export class AIManagementService {
     analysisData: {
       title?: string;
       description?: string;
-      prompt?: string;
       categories?: Array<{ id: number; name: string }>;
       tags?: Array<{ id: number; name: string }>;
     }
@@ -677,7 +672,6 @@ export class AIManagementService {
     const cleanedData = {
       title: analysisData.title,
       description: analysisData.description,
-      prompt: analysisData.prompt,
       categories: analysisData.categories?.map(cat => ({
         id: cat.id,
         name: cat.name
@@ -704,7 +698,6 @@ export class AIManagementService {
       modelName?: string;
       generate_title?: boolean;
       generate_description?: boolean;
-      generate_prompt?: boolean;
       generate_categories?: boolean;
       generate_tags?: boolean;
       max_categories?: number;
@@ -718,7 +711,6 @@ export class AIManagementService {
       {
         generate_title: options.generate_title ?? true,
         generate_description: options.generate_description ?? true,
-        generate_prompt: options.generate_prompt ?? true,
         generate_categories: options.generate_categories ?? true,
         generate_tags: options.generate_tags ?? true,
         max_categories: options.max_categories ?? 5,

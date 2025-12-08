@@ -85,7 +85,7 @@ class OllamaImageAnalysisCreateSerializer(serializers.Serializer):
     options = serializers.JSONField(
         required=False,
         default=dict,
-        help_text="分析选项配置，包括生成标题、描述、提示词、分类、标签等"
+        help_text="分析选项配置，包括生成标题、AI描述、分类、标签等"
     )
 
     def validate_media_id(self, value):
@@ -125,7 +125,7 @@ class OllamaImageAnalysisCreateSerializer(serializers.Serializer):
 
         # 验证支持的字段
         allowed_fields = {
-            'generate_title', 'generate_description', 'generate_prompt',
+            'generate_title', 'generate_description',
             'generate_categories', 'generate_tags', 'max_categories', 'max_tags',
             'temperature', 'top_p', 'max_tokens', 'max_concurrent', 'use_concurrency'
         }
@@ -134,7 +134,7 @@ class OllamaImageAnalysisCreateSerializer(serializers.Serializer):
                 raise serializers.ValidationError(f"不支持的分析选项: {field}")
 
         # 验证布尔选项
-        bool_fields = {'generate_title', 'generate_description', 'generate_prompt', 'generate_categories', 'generate_tags'}
+        bool_fields = {'generate_title', 'generate_description', 'generate_categories', 'generate_tags'}
         for field in bool_fields:
             if field in value and not isinstance(value[field], bool):
                 raise serializers.ValidationError(f"{field} 必须是布尔值")

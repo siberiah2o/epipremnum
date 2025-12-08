@@ -30,7 +30,6 @@ export function useAiAnalysis() {
       const requestFn = () => apiClient.analyzeSingle(file.id, modelName, {
         generate_title: options.generate_title ?? true,
         generate_description: options.generate_description ?? true,
-        generate_prompt: options.generate_prompt ?? false, // 默认不生成prompt以提高速度
         generate_categories: options.generate_categories ?? true,
         generate_tags: options.generate_tags ?? true,
         max_categories: options.max_categories ?? 3, // 减少到3个分类
@@ -49,8 +48,7 @@ export function useAiAnalysis() {
           title: rawResult.title,
           description: rawResult.description,
           categories: rawResult.categories || rawResult.ai_categories,
-          tags: rawResult.tags || rawResult.ai_tags,
-          prompt: rawResult.prompt || rawResult.ai_prompt
+          tags: rawResult.tags || rawResult.ai_tags
         }, options);
 
         console.log(`🔍 [AI分析] 过滤统计:`, filteredResult.filter_stats);

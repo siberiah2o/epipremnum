@@ -92,7 +92,6 @@ export function useAsyncBatchAnalysis() {
     options: {
       generate_title?: boolean;
       generate_description?: boolean;
-      generate_prompt?: boolean;
       generate_categories?: boolean;
       generate_tags?: boolean;
       max_categories?: number;
@@ -167,7 +166,6 @@ export function useAsyncBatchAnalysis() {
             {
               generate_title: options.generate_title ?? true,
               generate_description: options.generate_description ?? true,
-              generate_prompt: options.generate_prompt ?? false,
               generate_categories: options.generate_categories ?? true,
               generate_tags: options.generate_tags ?? true,
               max_categories: options.max_categories ?? 3, // 减少默认数量

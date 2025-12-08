@@ -7,7 +7,6 @@ export interface AnalysisResult {
   description?: string;
   categories?: Array<{ name: string; confidence?: number }>;
   tags?: Array<{ name: string; confidence?: number }>;
-  prompt?: string;
 }
 
 // 过滤后的分析结果

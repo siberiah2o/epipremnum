@@ -47,7 +47,6 @@ export function MediaEdit({ mediaId, onClose, onSuccess }: MediaEditProps) {
   const [formData, setFormData] = useState({
     title: "",
     description: "",
-    prompt: "",
   });
   const [selectedCategories, setSelectedCategories] = useState<number[]>([]);
   const [selectedTags, setSelectedTags] = useState<number[]>([]);
@@ -59,7 +58,6 @@ export function MediaEdit({ mediaId, onClose, onSuccess }: MediaEditProps) {
       setFormData({
         title: media.title,
         description: media.description,
-        prompt: media.prompt,
       });
       setSelectedCategories(media.categories.map((cat) => cat.id));
       setSelectedTags(media.tags.map((tag) => tag.id));
@@ -78,7 +76,6 @@ export function MediaEdit({ mediaId, onClose, onSuccess }: MediaEditProps) {
       const updateResult = await updateMedia({
         title: formData.title.trim(),
         description: formData.description.trim(),
-        prompt: formData.prompt.trim(),
         category_ids: selectedCategories,
         tag_ids: selectedTags,
       });
@@ -310,24 +307,6 @@ export function MediaEdit({ mediaId, onClose, onSuccess }: MediaEditProps) {
                     }))
                   }
                   placeholder="输入媒体文件描述"
-                  disabled={isSubmitting}
-                  rows={5}
-                />
-              </div>
-
-              {/* 生成提示词 */}
-              <div className="space-y-2">
-                <Label htmlFor="prompt">生成提示词</Label>
-                <Textarea
-                  id="prompt"
-                  value={formData.prompt}
-                  onChange={(e) =>
-                    setFormData((prev) => ({
-                      ...prev,
-                      prompt: e.target.value,
-                    }))
-                  }
-                  placeholder="输入用于生成的提示词或关键词"
                   disabled={isSubmitting}
                   rows={5}
                 />

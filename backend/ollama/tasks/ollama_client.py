@@ -1,287 +1,244 @@
 """
-Ollama图片分析客户端
-负责与Ollama API交互进行图片分析
+Ollama图片分析客户端 - 增强版（线程安全版本）
+支持单图片内4个分析并行执行，适配Django同步环境
 """
+import asyncio
+import aiohttp
+import base64
 import logging
 import time
-import base64
-import requests
+import threading
 import re
+import concurrent.futures
 from typing import Dict, Any
 from django.conf import settings
+from django.core.cache import cache
 from .prompt_templates import PromptTemplates, TaskConfig
-from .concurrency_manager import concurrency_manager
 
 logger = logging.getLogger(__name__)
 
-
-class OllamaImageAnalyzer:
-    """Ollama图片分析客户端"""
+class EnhancedOllamaImageAnalyzer:
+    """增强版Ollama图片分析器 - 线程安全版本"""
 
     def __init__(self):
         self.timeout = getattr(settings, 'OLLAMA_ANALYSIS_TIMEOUT', 300)
+        self.max_parallel_tasks = 4  # 每张图片并行执行的任务数
+        self.image_cache_ttl = 600   # 图片缓存10分钟
+        self.thread_pool = concurrent.futures.ThreadPoolExecutor(
+            max_workers=10,
+            thread_name_prefix="ollama_async_"
+        )
 
-    def analyze(self, analysis) -> Dict[str, Any]:
-        """执行图片分析"""
+    def analyze_parallel(self, analysis) -> Dict[str, Any]:
+        """
+        并行执行单张图片的所有分析任务 - 线程安全版本
+        使用线程池执行异步代码
+        """
+        # 在线程池中执行异步代码
+        future = self.thread_pool.submit(self._run_analyze_parallel, analysis)
+        try:
+            return future.result(timeout=self.timeout)
+        except Exception as e:
+            logger.error(f"并行分析线程执行失败: {str(e)}")
+            return {'success': False, 'error': f'并行分析失败: {str(e)}'}
+
+    def _run_analyze_parallel(self, analysis):
+        """在线程中运行异步分析"""
+        # 创建一个新的事件循环（每个线程独立）
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(self._analyze_parallel_async(analysis))
+        finally:
+            loop.close()
+
+    async def _analyze_parallel_async(self, analysis) -> Dict[str, Any]:
+        """异步并行分析主方法"""
         start_time = time.time()
 
         try:
-            # 验证输入
-            self._validate_input(analysis)
+            # 预先提取所有需要的数据，避免在异步上下文中访问模型
+            loop = asyncio.get_event_loop()
 
-            # 获取分析选项
-            options = analysis.analysis_options
+            # 在线程中提取所有模型数据
+            analysis_data = await loop.run_in_executor(None, self._extract_analysis_data, analysis)
 
-            # 强制使用多请求分析模式
-            results = {}
-            failed_tasks = []
+            # 在线程中执行验证
+            await loop.run_in_executor(None, self._validate_input, analysis)
 
-            # 根据用户选项确定需要执行的分析任务
-            enabled_tasks = TaskConfig.get_enabled_tasks(options)
-
-            # 如果没有指定任何选项，使用默认分析
+            # 获取需要执行的任务
+            enabled_tasks = TaskConfig.get_enabled_tasks(analysis_data['options'])
             if not enabled_tasks:
                 enabled_tasks = TaskConfig.get_default_tasks()
 
-            # 生成任务列表
+            # 准备图片数据（带缓存）
+            image_base64 = await self._get_cached_image_data(analysis)
+
+            # 准备所有任务
             tasks = []
             for task_type in enabled_tasks:
                 prompt = TaskConfig.get_task_prompt(
                     task_type,
-                    options.get(f'max_{task_type}') if task_type in ['categories', 'tags'] else None
+                    analysis_data['options'].get(f'max_{task_type}') if task_type in ['categories', 'tags'] else None
                 )
-                tasks.append((task_type, prompt))
 
-            # 修正：强制使用串行执行模式，因为图片间的并发在批量处理层面控制
-            # 每张图片内部的4个分析项目（标题、描述、分类、标签）必须串行执行以避免API冲突
-            logger.info(f"使用串行模式执行 {len(tasks)} 个任务（每张图片内的分析项目）")
-
-            for task_name, task_prompt in tasks:
-                try:
-                    data = self._prepare_single_analysis(analysis, task_prompt)
-                    api_result = self._call_api(analysis.model.endpoint.url, analysis.model.name, data)
-
-                    if api_result['success']:
-                        # 从 Ollama API 响应中提取实际文本
-                        response_dict = api_result['response']
-                        if isinstance(response_dict, dict) and 'response' in response_dict:
-                            response_text = response_dict['response']
-                        else:
-                            response_text = str(response_dict)
-
-                        task_result = self._process_single_result(response_text, task_name)
-                        results[task_name] = task_result
-                        logger.info(f"成功完成 {task_name} 分析")
-                    else:
-                        failed_tasks.append(f"{task_name}: {api_result['error']}")
-                        logger.error(f"{task_name} 分析失败: {api_result['error']}")
-
-                except Exception as e:
-                    failed_tasks.append(f"{task_name}: {str(e)}")
-                    logger.error(f"{task_name} 分析异常: {str(e)}")
-
-            logger.info(f"串行执行完成: 成功 {len(results)} 个，失败 {len(failed_tasks)} 个")
-
-            # 汇总结果
-            final_result = self._combine_results(results, options)
-
-            processing_time = int((time.time() - start_time) * 1000)
-
-            # 如果所有任务都失败了
-            if not results and failed_tasks:
-                return {
-                    'success': False,
-                    'error': f'所有分析任务都失败了: {"; ".join(failed_tasks)}'
-                }
-
-            return {
-                'success': True,
-                'result': final_result,
-                'processing_time_ms': processing_time if processing_time is not None else 0,
-                'model_used': analysis.model.name,
-                'endpoint_used': analysis.model.endpoint.name,
-                'partial_results': results,
-                'failed_tasks': failed_tasks if failed_tasks else None
-            }
-
-        except Exception as e:
-            logger.error(f"图片分析异常: {str(e)}")
-            return {'success': False, 'error': f'分析异常: {str(e)}'}
-
-    def analyze_with_cancellation(self, analysis, cancellable_task) -> Dict[str, Any]:
-        """执行图片分析 - 支持取消检查"""
-        start_time = time.time()
-
-        try:
-            # 验证输入
-            self._validate_input(analysis)
-
-            # 检查任务是否被取消
-            cancellable_task.check_cancelled()
-
-            # 获取分析选项
-            options = analysis.analysis_options
-
-            # 根据用户选项确定需要执行的分析任务
-            enabled_tasks = TaskConfig.get_enabled_tasks(options)
-
-            # 如果没有指定任何选项，使用默认分析
-            if not enabled_tasks:
-                enabled_tasks = TaskConfig.get_default_tasks()
-
-            # 检查任务是否被取消
-            cancellable_task.check_cancelled()
-
-            # 生成任务列表
-            tasks = []
-            for task_type in enabled_tasks:
-                prompt = TaskConfig.get_task_prompt(
+                tasks.append(self._call_ollama_api_async(
+                    analysis_data['endpoint_url'],
+                    analysis_data['model_name'],
+                    prompt,
+                    image_base64,
                     task_type,
-                    options.get(f'max_{task_type}') if task_type in ['categories', 'tags'] else None
-                )
-                tasks.append((task_type, prompt))
+                    analysis_data['options']
+                ))
 
-            # 检查任务是否被取消
-            cancellable_task.check_cancelled()
+            # 并行执行所有任务
+            semaphore = asyncio.Semaphore(self.max_parallel_tasks)
+            async_tasks = []
+            for task in tasks:
+                async_tasks.append(self._execute_with_semaphore(task, semaphore))
 
-            # 修正：强制使用串行执行模式，因为图片间的并发在批量处理层面控制
-            # 每张图片内部的4个分析项目（标题、描述、分类、标签）必须串行执行以避免API冲突
-            logger.info(f"使用支持取消的串行模式执行 {len(tasks)} 个任务（每张图片内的分析项目）")
+            results = await asyncio.gather(*async_tasks, return_exceptions=True)
 
-            results = {}
-            failed_tasks = []
-
-            for task_name, task_prompt in tasks:
-                # 每个任务开始前检查取消状态
-                cancellable_task.check_cancelled()
-
-                try:
-                    # 准备数据
-                    data = cancellable_task.execute_with_cancellation_check(
-                        self._prepare_single_analysis, analysis, task_prompt
-                    )
-
-                    # 再次检查取消状态
-                    cancellable_task.check_cancelled()
-
-                    # 调用API
-                    api_result = cancellable_task.execute_with_cancellation_check(
-                        self._call_api_with_timeout,
-                        analysis.model.endpoint.url,
-                        analysis.model.name,
-                        data,
-                        cancellable_task
-                    )
-
-                    # 检查取消状态
-                    cancellable_task.check_cancelled()
-
-                    if api_result['success']:
-                        # 处理结果
-                        response_dict = api_result['response']
-                        if isinstance(response_dict, dict) and 'response' in response_dict:
-                            response_text = response_dict['response']
-                        else:
-                            response_text = str(response_dict)
-
-                        task_result = self._process_single_result(response_text, task_name)
-                        results[task_name] = task_result
-                        logger.info(f"成功完成 {task_name} 分析")
-                    else:
-                        failed_tasks.append(f"{task_name}: {api_result['error']}")
-                        logger.error(f"{task_name} 分析失败: {api_result['error']}")
-
-                except Exception as e:
-                    failed_tasks.append(f"{task_name}: {str(e)}")
-                    logger.error(f"{task_name} 分析异常: {str(e)}")
-
-            logger.info(f"支持取消的串行执行完成: 成功 {len(results)} 个，失败 {len(failed_tasks)} 个")
-
-            # 检查最终取消状态
-            cancellable_task.check_cancelled()
-
-            # 汇总结果
-            final_result = self._combine_results(results, options)
-
-            processing_time = int((time.time() - start_time) * 1000)
-
-            # 如果所有任务都失败了
-            if not results and failed_tasks:
-                return {
-                    'success': False,
-                    'error': f'所有分析任务都失败了: {"; ".join(failed_tasks)}',
-                    'result': final_result,
-                    'failed_tasks': failed_tasks
-                }
-
-            return {
-                'success': True,
-                'result': final_result,
-                'processing_time_ms': processing_time if processing_time is not None else 0,
-                'model_used': analysis.model.name,
-                'endpoint_used': analysis.model.endpoint.name,
-                'partial_results': results,
-                'failed_tasks': failed_tasks if failed_tasks else []
-            }
+            # 处理结果
+            return self._process_parallel_results(results, enabled_tasks, analysis, start_time)
 
         except Exception as e:
-            logger.error(f"支持取消的图片分析异常: {str(e)}")
-            return {
-                'success': False,
-                'error': f'分析异常: {str(e)}',
-                'result': {},
-                'failed_tasks': [f'分析异常: {str(e)}']
-            }
+            import traceback
+            logger.error(f"并行分析异常: {str(e)}")
+            logger.error(f"异常堆栈: {traceback.format_exc()}")
+            return {'success': False, 'error': f'并行分析异常: {str(e)}'}
 
-    def _call_api_with_timeout(self, endpoint_url: str, model_name: str, data: Dict, cancellable_task) -> Dict:
-        """调用Ollama API（带取消检查）"""
+    async def _get_cached_image_data(self, analysis):
+        """获取缓存的图片数据"""
+        cache_key = f'image_b64_{analysis.media.id}'
+
+        # 在线程中执行缓存操作，避免异步冲突
+        loop = asyncio.get_event_loop()
+
+        def get_cache():
+            return cache.get(cache_key)
+
+        cached = await loop.run_in_executor(None, get_cache)
+
+        if cached:
+            return cached
+
+        # 读取并编码图片 - 使用线程池执行文件读取操作
+        image_base64 = await loop.run_in_executor(
+            None,  # 使用默认线程池
+            self._read_and_encode_image,
+            analysis
+        )
+
+        # 缓存结果 - 也在线程中执行
+        def set_cache():
+            cache.set(cache_key, image_base64, timeout=self.image_cache_ttl)
+
+        await loop.run_in_executor(None, set_cache)
+        return image_base64
+
+    def _read_and_encode_image(self, analysis):
+        """同步读取和编码图片"""
+        analysis.media.file.seek(0)
+        image_content = analysis.media.file.read()
+        image_base64 = base64.b64encode(image_content).decode('utf-8')
+        analysis.media.file.seek(0)
+        return image_base64
+
+    def _extract_analysis_data(self, analysis):
+        """提取分析所需的数据，避免在异步上下文中访问模型"""
+        return {
+            'options': dict(analysis.analysis_options) if analysis.analysis_options else {},
+            'endpoint_url': analysis.model.endpoint.url,
+            'model_name': analysis.model.name,
+            'media_id': analysis.media.id,
+        }
+
+    async def _call_ollama_api_async(self, endpoint_url, model_name, prompt, image_data, task_type, options):
+        """异步调用Ollama API"""
         api_url = f"{endpoint_url.rstrip('/')}/api/generate"
 
         request_data = {
             'model': model_name,
-            'prompt': data['prompt'],
-            'images': [data['image']],
+            'prompt': prompt,
+            'images': [image_data],
             'stream': False,
-            'options': data['options']
+            'options': {
+                'temperature': options.get('temperature', 0.7),
+                'top_p': options.get('top_p', 0.9),
+                'max_tokens': 300
+            }
         }
 
-        logger.info(f"调用Ollama API: model={model_name} (支持取消)")
-
         try:
-            # 使用带取消检查的请求
-            response = cancellable_task.execute_with_cancellation_check(
-                self._make_request, api_url, request_data
-            )
-
-            if response.status_code == 200:
-                api_response = response.json()
-                logger.info(f"Ollama API响应成功: model={model_name}")
-                return {
-                    'success': True,
-                    'response': api_response
-                }
-            else:
-                error_msg = f"API请求失败: HTTP {response.status_code}"
-                logger.error(f"Ollama API错误: {error_msg}")
-                return {'success': False, 'error': error_msg}
-
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=self.timeout)) as session:
+                async with session.post(api_url, json=request_data) as response:
+                    if response.status == 200:
+                        result = await response.json()
+                        return {
+                            'task_type': task_type,
+                            'success': True,
+                            'response': result.get('response', '')
+                        }
+                    else:
+                        return {
+                            'task_type': task_type,
+                            'success': False,
+                            'error': f"HTTP {response.status}"
+                        }
         except Exception as e:
-            if "取消" in str(e):
-                # 任务被取消
-                raise e
-            else:
-                error_msg = f"API调用异常: {str(e)}"
-                logger.error(f"Ollama API异常: {error_msg}")
-                return {'success': False, 'error': error_msg}
+            return {
+                'task_type': task_type,
+                'success': False,
+                'error': str(e)
+            }
 
-    def _make_request(self, url: str, data: Dict):
-        """实际的HTTP请求函数"""
-        return requests.post(
-            url,
-            json=data,
-            timeout=self.timeout,
-            headers={'Content-Type': 'application/json'}
-        )
+    async def _execute_with_semaphore(self, task, semaphore):
+        """带信号量限制执行任务"""
+        async with semaphore:
+            return await task
+
+    def _process_parallel_results(self, results, enabled_tasks, analysis, start_time):
+        """处理并行结果"""
+        processed_results = {}
+        failed_tasks = []
+
+        for result in results:
+            if isinstance(result, Exception):
+                task_type = getattr(result, 'task_type', 'unknown')
+                failed_tasks.append(f"{task_type}: {str(result)}")
+                continue
+
+            if result['success']:
+                try:
+                    task_result = self._process_single_result(
+                        result['response'],
+                        result['task_type']
+                    )
+                    processed_results[result['task_type']] = task_result
+                except Exception as e:
+                    failed_tasks.append(f"{result['task_type']}: 结果处理失败 - {str(e)}")
+            else:
+                failed_tasks.append(f"{result['task_type']}: {result.get('error', '未知错误')}")
+
+        # 汇总结果
+        final_result = self._combine_results(processed_results, analysis.analysis_options)
+        processing_time = int((time.time() - start_time) * 1000)
+
+        return {
+            'success': len(processed_results) > 0,
+            'result': final_result,
+            'processing_time_ms': processing_time,
+            'model_used': analysis.model.name,
+            'endpoint_used': analysis.model.endpoint.name,
+            'partial_results': processed_results,
+            'failed_tasks': failed_tasks if failed_tasks else None
+        }
+
+    # 保留向后兼容的同步方法
+    def analyze(self, analysis) -> Dict[str, Any]:
+        """向后兼容的同步分析"""
+        return self.analyze_parallel(analysis)
 
     def _validate_input(self, analysis):
         """验证输入"""
@@ -300,73 +257,7 @@ class OllamaImageAnalyzer:
         if f'.{file_extension}' not in image_extensions:
             raise Exception('只支持图片文件分析')
 
-    def _prepare_single_analysis(self, analysis, prompt):
-        """为单个分析任务准备数据"""
-        # 读取并编码图片
-        analysis.media.file.seek(0)
-        image_content = analysis.media.file.read()
-        image_base64 = base64.b64encode(image_content).decode('utf-8')
-        analysis.media.file.seek(0)
-
-        return {
-            'image': image_base64,
-            'prompt': prompt,
-            'options': {
-                'temperature': analysis.analysis_options.get('temperature', 0.7),
-                'top_p': analysis.analysis_options.get('top_p', 0.9),
-                'max_tokens': analysis.analysis_options.get('max_tokens', 300),  # 降低单个任务的token数量
-                'stream': False
-            }
-        }
-
     
-    def _call_api(self, endpoint_url: str, model_name: str, data: Dict) -> Dict:
-        """调用Ollama API"""
-        api_url = f"{endpoint_url.rstrip('/')}/api/generate"
-
-        request_data = {
-            'model': model_name,
-            'prompt': data['prompt'],
-            'images': [data['image']],
-            'stream': False,
-            'options': data['options']
-        }
-
-        logger.info(f"调用Ollama API: model={model_name}")
-
-        try:
-            response = requests.post(
-                api_url,
-                json=request_data,
-                timeout=self.timeout,
-                headers={'Content-Type': 'application/json'}
-            )
-
-            if response.status_code == 200:
-                api_response = response.json()
-                logger.info(f"Ollama API响应成功: model={model_name}")
-                return {
-                    'success': True,
-                    'response': api_response
-                }
-            else:
-                error_msg = f"API请求失败: HTTP {response.status_code}"
-                logger.error(f"Ollama API错误: {error_msg}")
-                return {'success': False, 'error': error_msg}
-
-        except requests.exceptions.Timeout:
-            error_msg = "API请求超时"
-            logger.error(f"Ollama API超时: {error_msg}")
-            return {'success': False, 'error': error_msg}
-        except requests.exceptions.ConnectionError:
-            error_msg = "无法连接到Ollama服务"
-            logger.error(f"Ollama API连接错误: {error_msg}")
-            return {'success': False, 'error': error_msg}
-        except Exception as e:
-            error_msg = f"API调用异常: {str(e)}"
-            logger.error(f"Ollama API异常: {error_msg}")
-            return {'success': False, 'error': error_msg}
-
     def _process_single_result(self, response_text: str, task_type: str) -> str:
         """处理单个任务的分析结果"""
         response_text = response_text.strip()
@@ -417,15 +308,6 @@ class OllamaImageAnalyzer:
 
             return filtered_result
 
-        elif task_type == 'prompt':
-            # 提取AI绘画提示词：主要文本内容
-            lines = response_text.split('\n')
-            prompt_lines = []
-            for line in lines:
-                line = line.strip()
-                if line and not line.startswith(('标题：', 'Title:', '描述：', 'Description:')):
-                    prompt_lines.append(line)
-            return ' '.join(prompt_lines)[:300]  # 限制长度
 
         return response_text
 
@@ -436,7 +318,6 @@ class OllamaImageAnalyzer:
             'description': '',
             'categories': [],
             'tags': [],
-            'prompt': '',
             'analysis_options': options
         }
 
@@ -461,10 +342,9 @@ class OllamaImageAnalyzer:
         elif options.get('generate_tags'):
             combined['tags'] = []
 
-        if 'prompt' in results:
-            combined['prompt'] = results['prompt']
-        elif options.get('generate_prompt'):
-            combined['prompt'] = ''
 
         return combined
 
+
+# 更新全局实例
+OllamaImageAnalyzer = EnhancedOllamaImageAnalyzer

@@ -74,12 +74,11 @@ export function SimpleBatchAnalysis({
   const [analysisOptions, setAnalysisOptions] = useState({
     generateTitle: true,
     generateDescription: true,
-    generatePrompt: true, // 默认勾选提示词分析
     generateCategories: true,
     generateTags: true,
     maxCategories: 5,
     maxTags: 10,
-    concurrency: 2, // 默认并发数
+    concurrency: 5, // 默认并发数
   });
 
   // 使用工具函数获取排序后的视觉模型
@@ -145,7 +144,6 @@ export function SimpleBatchAnalysis({
       {
         generate_title: analysisOptions.generateTitle,
         generate_description: analysisOptions.generateDescription,
-        generate_prompt: analysisOptions.generatePrompt,
         generate_categories: analysisOptions.generateCategories,
         generate_tags: analysisOptions.generateTags,
         max_categories: analysisOptions.maxCategories,
@@ -337,27 +335,6 @@ export function SimpleBatchAnalysis({
                   <div className="flex items-center space-x-2">
                     <input
                       type="checkbox"
-                      id="generatePrompt"
-                      checked={analysisOptions.generatePrompt}
-                      onChange={(e) =>
-                        setAnalysisOptions((prev) => ({
-                          ...prev,
-                          generatePrompt: e.target.checked,
-                        }))
-                      }
-                      disabled={batchState.isRunning}
-                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 w-4 h-4"
-                    />
-                    <label
-                      htmlFor="generatePrompt"
-                      className="text-sm cursor-pointer"
-                    >
-                      生成提示词
-                    </label>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <input
-                      type="checkbox"
                       id="generateCategories"
                       checked={analysisOptions.generateCategories}
                       onChange={(e) =>
@@ -463,14 +440,14 @@ export function SimpleBatchAnalysis({
                       type="number"
                       id="concurrency"
                       min="1"
-                      max="5"
+                      max="10"
                       value={analysisOptions.concurrency}
                       onChange={(e) =>
                         setAnalysisOptions((prev) => ({
                           ...prev,
                           concurrency: Math.min(
-                            5,
-                            Math.max(1, parseInt(e.target.value) || 2)
+                            10,
+                            Math.max(1, parseInt(e.target.value) || 5)
                           ),
                         }))
                       }
@@ -478,7 +455,7 @@ export function SimpleBatchAnalysis({
                       className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
                     />
                     <p className="text-xs text-gray-500">
-                      同时处理的图片数量（1-5）
+                      同时处理的图片数量（1-10）
                     </p>
                   </div>
                 </div>

@@ -342,11 +342,15 @@ class StateManager:
                 if result.get('title'):
                     media.title = result['title'][:200]  # 限制长度
 
+                # 合并描述和提示词为AI描述
+                ai_description_parts = []
                 if result.get('description'):
-                    media.description = result['description'][:1000]  # 限制长度
-
+                    ai_description_parts.append(result['description'][:1000])
                 if result.get('prompt'):
-                    media.prompt = result['prompt'][:500]  # 限制长度
+                    ai_description_parts.append(f"提示词: {result['prompt'][:500]}")
+
+                if ai_description_parts:
+                    media.description = '\n\n'.join(ai_description_parts)
 
                 # 处理分类
                 if result.get('categories') and isinstance(result['categories'], list):

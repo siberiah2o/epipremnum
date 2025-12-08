@@ -467,31 +467,6 @@ export function MediaPreviewDialog({
                     </div>
                   )}
 
-                  {/* 提示词 */}
-                  {mediaDetails?.prompt && (
-                    <div>
-                      <div className="text-sm font-medium text-muted-foreground mb-2 flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <FileText className="h-4 w-4" />
-                          提示词
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleCopyText(mediaDetails.prompt!)}
-                          className="h-6 w-6 p-0"
-                        >
-                          <Copy className="h-3 w-3" />
-                        </Button>
-                      </div>
-                      <div className="p-3 bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded max-h-40 overflow-y-auto">
-                        <pre className="text-sm whitespace-pre-wrap font-mono text-blue-900 dark:text-blue-100 leading-normal">
-                          {mediaDetails.prompt}
-                        </pre>
-                      </div>
-                    </div>
-                  )}
-
                   {/* 分类和标签 */}
                   <div className="flex gap-4">
                     {/* 分类 */}

@@ -148,7 +148,6 @@ export function useMediaFiles(initialPageSize = 24) {
         // AI相关字段 - 优先使用AI分析记录中的数据
         ai_description:
           aiAnalysisData?.description || mediaData.description || null,
-        ai_prompt: aiAnalysisData?.prompt || mediaData.prompt || null,
         ai_categories:
           aiAnalysisData?.suggested_categories_data?.map((cat: any) => ({
             id: cat.id,
@@ -178,7 +177,6 @@ export function useMediaFiles(initialPageSize = 24) {
         id: updatedFile.id,
         title: updatedFile.title,
         hasAiDescription: !!updatedFile.ai_description,
-        hasAiPrompt: !!updatedFile.ai_prompt,
         aiCategoriesCount: updatedFile.ai_categories?.length || 0,
         aiTagsCount: updatedFile.ai_tags?.length || 0,
         aiAnalyzedAt: updatedFile.ai_analyzed_at,

@@ -86,13 +86,12 @@ export function NewBatchAnalysis({
   const { state: batchState, performBatchAnalysis, resetState, isPolling } = useAsyncBatchAnalysis();
 
   // 并发控制状态
-  const [concurrencyLimit, setConcurrencyLimit] = useState(2); // 默认2个并发
+  const [concurrencyLimit, setConcurrencyLimit] = useState(5); // 默认5个并发
 
   // 分析选项
   const [analysisOptions, setAnalysisOptions] = useState({
     generateTitle: true,
     generateDescription: true,
-    generatePrompt: false,
     generateCategories: true,
     generateTags: true,
     maxCategories: 5,
@@ -186,7 +185,6 @@ export function NewBatchAnalysis({
         {
           generate_title: analysisOptions.generateTitle,
           generate_description: analysisOptions.generateDescription,
-          generate_prompt: analysisOptions.generatePrompt,
           generate_categories: analysisOptions.generateCategories,
           generate_tags: analysisOptions.generateTags,
           max_categories: analysisOptions.maxCategories,
@@ -760,20 +758,6 @@ export function NewBatchAnalysis({
               <label className="flex items-center space-x-1 text-sm">
                 <input
                   type="checkbox"
-                  checked={analysisOptions.generatePrompt}
-                  onChange={(e) =>
-                    setAnalysisOptions({
-                      ...analysisOptions,
-                      generatePrompt: e.target.checked,
-                    })
-                  }
-                  disabled={isRunning}
-                />
-                <span>提示词</span>
-              </label>
-              <label className="flex items-center space-x-1 text-sm">
-                <input
-                  type="checkbox"
                   checked={analysisOptions.generateCategories}
                   onChange={(e) =>
                     setAnalysisOptions({
@@ -870,7 +854,7 @@ export function NewBatchAnalysis({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {[1, 2, 3, 4, 5].map((num) => (
+                    {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((num) => (
                       <SelectItem key={num} value={num.toString()}>
                         {num}
                       </SelectItem>

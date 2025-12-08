@@ -71,7 +71,6 @@ export interface MediaFile {
   id: number;
   title: string;
   description: string;
-  prompt: string;
   file: string;
   file_type: string;
   file_size: number;
@@ -103,7 +102,6 @@ export interface MediaListItem {
     id: number;
     name: string;
   }> | null;
-  ai_prompt?: string | null;
   ai_analyzed_at?: string | null;
   // 添加完整的分类和标签字段
   categories?: Array<{
@@ -162,7 +160,6 @@ export interface UploadMediaData {
   file: File;
   title: string;
   description?: string;
-  prompt?: string;
   category_ids?: number[];
   tag_ids?: number[];
 }
@@ -170,7 +167,6 @@ export interface UploadMediaData {
 export interface UpdateMediaData {
   title?: string;
   description?: string;
-  prompt?: string;
   category_ids?: number[];
   tag_ids?: number[];
 }
@@ -221,7 +217,6 @@ export interface AIAnalysisResult {
   suggestions: {
     title?: string;
     description?: string;
-    prompt?: string;
     categories?: SuggestedCategory[];
     tags?: SuggestedTag[];
   };
@@ -249,7 +244,6 @@ export interface SuggestedTag {
 export interface CombinedAnalysisOptions {
   generateTitle?: boolean;
   generateDescription?: boolean;
-  generatePrompt?: boolean;
   generateCategories?: boolean;
   generateTags?: boolean;
   maxCategories?: number;
@@ -260,7 +254,6 @@ export interface CombinedAnalysisOptions {
 export interface ApplyAnalysisOptions {
   applyTitle?: boolean;
   applyDescription?: boolean;
-  applyPrompt?: boolean;
   applyCategories?: boolean;
   applyTags?: boolean;
   categoryIds?: number[];
@@ -674,7 +667,6 @@ class ApiClient {
     formData.append("title", data.title);
 
     if (data.description) formData.append("description", data.description);
-    if (data.prompt) formData.append("prompt", data.prompt);
     if (data.category_ids && data.category_ids.length > 0) {
       // 将数组作为 JSON 字符串发送
       formData.append("category_ids", JSON.stringify(data.category_ids));
@@ -968,7 +960,6 @@ class ApiClient {
         options: {
           generate_title: options.generateTitle ?? true,
           generate_description: options.generateDescription ?? true,
-          generate_prompt: options.generatePrompt ?? true,
           generate_categories: options.generateCategories ?? true,
           generate_tags: options.generateTags ?? true,
           max_categories: options.maxCategories ?? 5,
@@ -1031,7 +1022,6 @@ class ApiClient {
     options?: {
       generate_title?: boolean;
       generate_description?: boolean;
-      generate_prompt?: boolean;
       generate_categories?: boolean;
       generate_tags?: boolean;
       max_categories?: number;
@@ -1051,7 +1041,6 @@ class ApiClient {
           options: {
             generate_title: options?.generate_title ?? true,
             generate_description: options?.generate_description ?? true,
-            generate_prompt: options?.generate_prompt ?? false, // 默认不生成prompt以提高速度
             generate_categories: options?.generate_categories ?? true,
             generate_tags: options?.generate_tags ?? true,
             max_categories: options?.max_categories ?? 3, // 默认减少到3个

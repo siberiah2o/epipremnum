@@ -129,7 +129,6 @@ export function AIAnalysisManagement({
           console.log(`🔍 [UPDATE] 获取到更新后的文件数据:`, {
             title: updatedFile.title,
             hasAiDescription: !!updatedFile.ai_description,
-            hasAiPrompt: !!updatedFile.ai_prompt,
             aiCategoriesCount: updatedFile.ai_categories?.length || 0,
             aiTagsCount: updatedFile.ai_tags?.length || 0,
             aiAnalyzedAt: updatedFile.ai_analyzed_at,

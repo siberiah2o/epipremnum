@@ -41,7 +41,7 @@ class MediaSerializer(serializers.ModelSerializer):
     class Meta:
         model = Media
         fields = (
-            'id', 'title', 'description', 'prompt', 'file', 'file_type', 'file_size',
+            'id', 'title', 'description', 'file', 'file_type', 'file_size',
             'thumbnail', 'file_url', 'thumbnail_url', 'user', 'categories', 'tags',
             'category_ids', 'tag_ids', 'created_at', 'updated_at'
         )
@@ -157,7 +157,7 @@ class MediaUploadSerializer(serializers.ModelSerializer):
     """媒体文件上传序列化器"""
     class Meta:
         model = Media
-        fields = ('file', 'title', 'description', 'prompt', 'category_ids', 'tag_ids')
+        fields = ('file', 'title', 'description', 'category_ids', 'tag_ids')
 
     def validate(self, data):
         """验证上传数据"""

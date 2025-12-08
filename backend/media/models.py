@@ -100,8 +100,7 @@ class Media(models.Model):
     ]
 
     title = models.CharField(max_length=200, blank=True, null=True, verbose_name='标题')
-    description = models.TextField(blank=True, null=True, verbose_name='描述')
-    prompt = models.TextField(blank=True, null=True, verbose_name='提示词')  # 仅对图片有效
+    description = models.TextField(blank=True, null=True, verbose_name='AI描述')
     file = models.FileField(upload_to=user_media_path, verbose_name='文件')
     file_type = models.CharField(max_length=10, choices=FILE_TYPE_CHOICES, verbose_name='文件类型')
     file_size = models.BigIntegerField(verbose_name='文件大小(字节)')
