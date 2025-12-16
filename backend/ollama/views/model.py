@@ -37,6 +37,11 @@ class ModelCRUDHandler(BaseViewSetMixin):
         if endpoint_id:
             queryset = queryset.filter(endpoint_id=endpoint_id)
 
+        # Filter by default endpoint flag
+        default_only = self.request.query_params.get('default_only')
+        if default_only is not None and default_only.lower() == 'true':
+            queryset = queryset.filter(endpoint__is_default=True)
+
         # Filter by vision capability
         vision_capable = self.request.query_params.get('vision_capable')
         if vision_capable is not None:

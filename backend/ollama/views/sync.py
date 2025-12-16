@@ -4,6 +4,7 @@ Model synchronization view handlers
 
 import requests
 from ..models import OllamaAIModel, OllamaEndpoint
+from ..clients.client_factory import ClientFactory
 from .base import BaseResponseHandler, BaseViewSetMixin
 
 
@@ -88,15 +89,9 @@ class ModelSyncHandler(BaseViewSetMixin):
 
     def _sync_models_from_endpoint(self, endpoint):
         """Sync models from a single endpoint"""
-        response = requests.get(
-            f"{endpoint.url.rstrip('/')}/api/tags",
-            timeout=30
-        )
+        # 使用 ClientFactory 获取模型列表（统一使用 LangChain）
+        models_data = ClientFactory.get_available_models(endpoint)
 
-        if response.status_code != 200:
-            raise Exception(f'获取模型列表失败: HTTP {response.status_code}')
-
-        models_data = response.json().get('models', [])
         pulled_models = []
         errors = []
 
@@ -120,12 +115,30 @@ class ModelSyncHandler(BaseViewSetMixin):
 
     def _process_model_info(self, model_info, endpoint):
         """Process individual model information"""
-        # Check vision capability based on model name
-        model_name = model_info.get('name', '')
-        is_vision_capable = self._check_vision_capability(model_name)
+        # 根据供应商类型处理模型信息
+        if endpoint.provider == 'zhipu':
+            # 智谱AI的模型信息格式
+            model_name = model_info.get('name', '')
+            display_name = model_info.get('display_name', model_name)
+            is_vision_capable = model_info.get('supports_vision', False)
+            description = model_info.get('description', '')
+            size_info = model_info.get('size', '未知')
 
-        # Get model size information
-        size_info = model_info.get('details', {}).get('parameter_size', '未知')
+            # 构造ollama_info格式
+            ollama_info = {
+                'name': model_name,
+                'display_name': display_name,
+                'description': description,
+                'supports_vision': is_vision_capable,
+                'provider': 'zhipu',
+                'raw_info': model_info
+            }
+        else:
+            # Ollama等其他供应商的模型信息格式
+            model_name = model_info.get('name', '')
+            is_vision_capable = self._check_vision_capability(model_name)
+            size_info = model_info.get('details', {}).get('parameter_size', '未知')
+            ollama_info = model_info
 
         # Create or update model
         model, created = OllamaAIModel.objects.update_or_create(
@@ -137,7 +150,7 @@ class ModelSyncHandler(BaseViewSetMixin):
                 'model_size': size_info,
                 'digest': model_info.get('digest', ''),
                 'modified_at': model_info.get('modified_at'),
-                'ollama_info': model_info
+                'ollama_info': ollama_info
             }
         )
 
@@ -145,12 +158,14 @@ class ModelSyncHandler(BaseViewSetMixin):
             'name': model_name,
             'size': size_info,
             'vision_capable': is_vision_capable,
-            'status': 'created' if created else 'updated'
+            'status': 'created' if created else 'updated',
+            'provider': endpoint.provider
         }
 
     def _check_vision_capability(self, model_name):
         """Check if model supports vision based on name patterns"""
         vision_keywords = [
-            'llava', 'vision', 'clip', 'multimodal', 'vl', 'minicpm'
+            'llava', 'vision', 'clip', 'multimodal', 'vl', 'minicpm',
+            'glm-4.6v', 'glm-4.1v', 'gpt-4-vision', 'claude-3-vision'
         ]
         return any(keyword in model_name.lower() for keyword in vision_keywords)

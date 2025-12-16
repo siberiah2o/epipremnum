@@ -87,23 +87,13 @@ export interface MediaFile {
 export interface MediaListItem {
   id: number;
   title: string;
-  description: string | null;
+  description: string | null;  // AI生成的描述
   file_type: string;
   file_size: number;
   file_url: string;
   thumbnail_url: string | null;
   created_at: string;
-  ai_description: string | null;
-  ai_tags?: Array<{
-    id: number;
-    name: string;
-  }> | null;
-  ai_categories?: Array<{
-    id: number;
-    name: string;
-  }> | null;
-  ai_analyzed_at?: string | null;
-  // 添加完整的分类和标签字段
+  // AI分析后的分类和标签
   categories?: Array<{
     id: number;
     name: string;
@@ -196,12 +186,17 @@ export interface BatchDeleteData {
 export interface OllamaModel {
   id: number;
   name: string;
-  display_name: string;
-  description: string;
+  endpoint: number;
+  endpoint_name?: string;
   is_active: boolean;
   is_vision_capable: boolean;
-  model_size: string;
-  api_endpoint?: string;
+  is_default: boolean;
+  model_size?: string;
+  digest?: string;
+  modified_at?: string;
+  ollama_info?: any;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface AIAnalysisResult {
@@ -263,17 +258,20 @@ export interface ApplyAnalysisOptions {
 export interface OllamaEndpoint {
   id: number;
   name: string;
+  provider: string;
+  provider_display?: string;
   url: string;
+  api_key?: string;
+  has_api_key?: boolean;
+  auth_type: string;
+  auth_type_display?: string;
   description?: string;
-  is_active?: boolean;
-  is_default?: boolean;
-  timeout?: number;
-  created_by?: string;
+  is_active: boolean;
+  is_default: boolean;
+  created_by: number;
   created_by_username?: string;
-  created_at?: string;
-  updated_at?: string;
-  can_delete?: boolean;
-  is_owner?: boolean;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface BatchUpdateCategoriesData {
@@ -969,52 +967,6 @@ class ApiClient {
     });
   }
 
-  // 获取可用模型列表
-  async getAvailableModels(): Promise<ApiResponse<any>> {
-    return this.request<any>("/api/ollama/models/");
-  }
-
-  // 刷新 Ollama 模型
-  async refreshOllamaModels(endpointId?: number): Promise<ApiResponse<any>> {
-    return this.request<any>("/api/ollama/models/refresh_all/", {
-      method: "POST",
-      body: JSON.stringify({
-        endpoint_id: endpointId,
-      }),
-    });
-  }
-
-  // 获取模型详情
-  async getModelDetails(modelId: number): Promise<ApiResponse<any>> {
-    return this.request<any>(`/api/ollama/models/${modelId}/`);
-  }
-
-  // 测试模型连接
-  async testModel(modelId: number): Promise<ApiResponse<any>> {
-    return this.request<any>(`/api/ollama/models/${modelId}/test/`);
-  }
-
-  // 设置默认模型（通过ID）
-  async setDefaultModelById(modelId: number): Promise<ApiResponse<any>> {
-    return this.request<any>(`/api/ollama/models/${modelId}/default/`, {
-      method: "POST",
-    });
-  }
-
-  // 设置默认模型（通过名称和端点）
-  async setDefaultModelByName(
-    modelName: string,
-    endpointId: number
-  ): Promise<ApiResponse<any>> {
-    return this.request<any>("/api/ollama/models/set-default/", {
-      method: "POST",
-      body: JSON.stringify({
-        model_name: modelName,
-        endpoint_id: endpointId,
-      }),
-    });
-  }
-
   // 图片分析接口 - 根据新API文档更新（异步分析）
   async analyzeSingle(
     mediaId: number,
@@ -1096,30 +1048,32 @@ class ApiClient {
     });
   }
 
-  // ============ Ollama 端点管理接口 ============
+  // ============ 端点管理接口 ============
 
   // 获取所有端点
-  async getEndpoints(): Promise<ApiResponse<any>> {
-    return this.request<any>("/api/ollama/endpoints/");
+  async getEndpoints(): Promise<ApiResponse<OllamaEndpoint[]>> {
+    return this.request<OllamaEndpoint[]>("/api/endpoint/endpoints/");
   }
 
   // 创建新端点
   async createEndpoint(data: {
     name: string;
+    provider?: string;
     url: string;
+    auth_type?: string;
+    api_key?: string;
     description?: string;
     is_default?: boolean;
-    timeout?: number;
-  }): Promise<ApiResponse<any>> {
-    return this.request<any>("/api/ollama/endpoints/", {
+  }): Promise<ApiResponse<OllamaEndpoint>> {
+    return this.request<OllamaEndpoint>("/api/endpoint/endpoints/", {
       method: "POST",
       body: JSON.stringify(data),
     });
   }
 
   // 获取端点详情
-  async getEndpoint(endpointId: number): Promise<ApiResponse<any>> {
-    return this.request<any>(`/api/ollama/endpoints/${endpointId}/`);
+  async getEndpoint(endpointId: number): Promise<ApiResponse<OllamaEndpoint>> {
+    return this.request<OllamaEndpoint>(`/api/endpoint/endpoints/${endpointId}/`);
   }
 
   // 更新端点
@@ -1127,34 +1081,94 @@ class ApiClient {
     endpointId: number,
     data: {
       name?: string;
+      provider?: string;
       url?: string;
+      auth_type?: string;
+      api_key?: string;
       description?: string;
       is_active?: boolean;
       is_default?: boolean;
-      timeout?: number;
     }
-  ): Promise<ApiResponse<any>> {
-    return this.request<any>(`/api/ollama/endpoints/${endpointId}/`, {
-      method: "PATCH",
+  ): Promise<ApiResponse<OllamaEndpoint>> {
+    return this.request<OllamaEndpoint>(`/api/endpoint/endpoints/${endpointId}/`, {
+      method: "PUT",
       body: JSON.stringify(data),
     });
   }
 
   // 删除端点
-  async deleteEndpoint(endpointId: number): Promise<ApiResponse<any>> {
-    return this.request<any>(`/api/ollama/endpoints/${endpointId}/delete/`, {
-      method: "POST",
+  async deleteEndpoint(endpointId: number): Promise<ApiResponse<null>> {
+    return this.request<null>(`/api/endpoint/endpoints/${endpointId}/`, {
+      method: "DELETE",
     });
   }
 
   // 测试端点连接
-  async testEndpoint(endpointId?: number): Promise<ApiResponse<any>> {
-    if (!endpointId) {
-      throw new Error("端点ID是必需的");
-    }
-    return this.request<any>(`/api/ollama/endpoints/${endpointId}/test_connection/`, {
+  async testEndpoint(endpointId: number): Promise<ApiResponse<any>> {
+    return this.request<any>(`/api/endpoint/endpoints/${endpointId}/test_connection/`, {
       method: "POST",
     });
+  }
+
+  // 设置默认端点
+  async setDefaultEndpoint(endpointId: number): Promise<ApiResponse<OllamaEndpoint>> {
+    return this.request<OllamaEndpoint>(`/api/endpoint/endpoints/${endpointId}/set_default/`, {
+      method: "POST",
+    });
+  }
+
+  // 获取默认端点
+  async getDefaultEndpoint(): Promise<ApiResponse<OllamaEndpoint>> {
+    return this.request<OllamaEndpoint>("/api/endpoint/endpoints/default/");
+  }
+
+  // ============ 模型管理接口 ============
+
+  // 获取可用模型列表
+  async getAvailableModels(params?: {
+    endpoint_id?: number;
+    default_only?: boolean;
+    vision_capable?: boolean;
+    is_active?: boolean;
+  }): Promise<ApiResponse<any>> {
+    const searchParams = new URLSearchParams();
+    if (params?.endpoint_id) searchParams.append('endpoint_id', params.endpoint_id.toString());
+    if (params?.default_only) searchParams.append('default_only', 'true');
+    if (params?.vision_capable !== undefined) searchParams.append('vision_capable', params.vision_capable.toString());
+    if (params?.is_active !== undefined) searchParams.append('is_active', params.is_active.toString());
+
+    const query = searchParams.toString();
+    return this.request<any>(`/api/endpoint/models/${query ? '?' + query : ''}`);
+  }
+
+  // 获取模型详情
+  async getModelDetails(modelId: number): Promise<ApiResponse<any>> {
+    return this.request<any>(`/api/endpoint/models/${modelId}/`);
+  }
+
+  // 设置默认模型
+  async setDefaultModel(modelId: number): Promise<ApiResponse<any>> {
+    return this.request<any>(`/api/endpoint/models/${modelId}/set_default/`, {
+      method: "POST",
+    });
+  }
+
+  // 设置模型视觉能力
+  async setModelVisionCapability(modelId: number, isVisionCapable: boolean): Promise<ApiResponse<any>> {
+    return this.request<any>(`/api/endpoint/models/${modelId}/set_vision_capable/`, {
+      method: "POST",
+      body: JSON.stringify({ is_vision_capable: isVisionCapable }),
+    });
+  }
+
+  // 获取默认模型
+  async getDefaultModel(): Promise<ApiResponse<any>> {
+    return this.request<any>("/api/endpoint/models/default/");
+  }
+
+  // 获取支持视觉的模型
+  async getVisionModels(): Promise<ApiResponse<any>> {
+    return this.request<any>("/api/endpoint/models/vision_models/");
   }
 }
 

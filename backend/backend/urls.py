@@ -25,6 +25,7 @@ urlpatterns = [
     path('api/media/', include('media.urls', namespace='media')),
     #path('api/ollama/', include('ollama_ai.urls', namespace='ollama_ai')),
     path('api/ollama/', include('ollama.urls', namespace='ollama')),
+    path('api/endpoint/', include('endpoint.urls', namespace='endpoint')),
 ]
 
 # 开发环境下的静态文件服务

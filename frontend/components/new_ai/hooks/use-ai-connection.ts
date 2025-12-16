@@ -18,7 +18,7 @@ export const useAIConnection = () => {
       try {
         // 连接测试可能需要较长时间，设置30秒超时
         const result = await apiRequest(
-          `/api/ollama/endpoints/${endpointId}/test_connection/`,
+          `/api/endpoint/endpoints/${endpointId}/test_connection/`,
           {
             method: "POST",
           },

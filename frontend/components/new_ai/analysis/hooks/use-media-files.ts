@@ -145,31 +145,10 @@ export function useMediaFiles(initialPageSize = 24) {
         file_url: mediaData.file_url,
         thumbnail_url: mediaData.thumbnail_url,
         created_at: mediaData.created_at,
-        // AI相关字段 - 优先使用AI分析记录中的数据
-        ai_description:
-          aiAnalysisData?.description || mediaData.description || null,
-        ai_categories:
-          aiAnalysisData?.suggested_categories_data?.map((cat: any) => ({
-            id: cat.id,
-            name: cat.name,
-          })) ||
-          (mediaData.categories &&
-            mediaData.categories.map((cat: any) => ({
-              id: cat.id,
-              name: cat.name,
-            }))) ||
-          [],
-        ai_tags:
-          aiAnalysisData?.suggested_tags_data?.map((tag: any) => ({
-            id: tag.id,
-            name: tag.name,
-          })) ||
-          (mediaData.tags &&
-            mediaData.tags.map((tag: any) => ({
-              id: tag.id,
-              name: tag.name,
-            }))) ||
-          [],
+        // AI相关字段 - 直接使用后端返回的字段
+        ai_description: mediaData.description || null,
+        ai_categories: mediaData.categories || [],
+        ai_tags: mediaData.tags || [],
         ai_analyzed_at: aiAnalysisData?.analyzed_at || null,
       };
 

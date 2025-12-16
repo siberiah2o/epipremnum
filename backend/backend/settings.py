@@ -59,6 +59,8 @@ INSTALLED_APPS = [
     'users',
     'media',
     'ollama',  # 添加 ollama 应用
+    'endpoint',  # 添加 endpoint 应用
+    'workflow',  # 添加 workflow 应用（从ollama.tasks迁移过来）
     'django_async_manager',
     'utils',  # 添加工具包应用
 ]
@@ -258,6 +260,36 @@ LOGGING = {
         'utils.middleware': {
             'handlers': ['console'],
             'level': 'INFO',
+            'propagate': False,
+        },
+        'ollama': {
+            'handlers': ['console'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'ollama.tasks.state_manager': {
+            'handlers': ['console'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'ollama.tasks.ollama_client': {
+            'handlers': ['console'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'workflow': {
+            'handlers': ['console'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'workflow.state_manager': {
+            'handlers': ['console'],
+            'level': 'DEBUG',
+            'propagate': False,
+        },
+        'workflow.ollama_client': {
+            'handlers': ['console'],
+            'level': 'DEBUG',
             'propagate': False,
         },
     },

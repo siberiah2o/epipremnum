@@ -16,7 +16,7 @@ from ..serializers import (
     OllamaImageAnalysisTaskRetrySerializer,
     OllamaImageAnalysisTaskCancelSerializer
 )
-from ..tasks.task_service import task_service
+from workflow.task_service import task_service
 from django.utils import timezone
 
 
@@ -44,8 +44,8 @@ class AnalysisTaskHandler(BaseViewSetMixin):
 
         # 使用原子状态管理器创建分析任务
         from ..models import Media, OllamaAIModel
-        from ..tasks.state_manager import state_manager
-        from ..tasks.task_workers import analyze_image_task
+        from workflow.state_manager import state_manager
+        from workflow.task_workers import analyze_image_task
 
         try:
             # 验证媒体文件
@@ -59,14 +59,14 @@ class AnalysisTaskHandler(BaseViewSetMixin):
             if model_name:
                 model = OllamaAIModel.objects.get(
                     name=model_name,
-                    endpoint__created_by=self.request.user,
+                    endpoint__is_active=True,
                     is_active=True,
                     is_vision_capable=True
                 )
             else:
                 # 使用默认模型
                 model = OllamaAIModel.objects.filter(
-                    endpoint__created_by=self.request.user,
+                    endpoint__is_active=True,
                     is_active=True,
                     is_vision_capable=True,
                     is_default=True
@@ -210,7 +210,7 @@ class AnalysisTaskHandler(BaseViewSetMixin):
 
             # 查找用户拥有的模型
             model = OllamaAIModel.objects.filter(
-                endpoint__created_by=self.viewset.request.user,
+                endpoint__is_active=True,
                 name=model_name,
                 is_active=True,
                 is_vision_capable=True
@@ -263,7 +263,7 @@ class AnalysisBatchHandler(BaseViewSetMixin):
         try:
             model = OllamaAIModel.objects.get(
                 name=model_name,
-                endpoint__created_by=self.viewset.request.user,
+                endpoint__is_active=True,
                 is_active=True,
                 is_vision_capable=True
             )
@@ -512,7 +512,7 @@ class AnalysisBatchHandler(BaseViewSetMixin):
 
             # 查找用户拥有的模型
             model = OllamaAIModel.objects.filter(
-                endpoint__created_by=self.viewset.request.user,
+                endpoint__is_active=True,
                 name=model_name,
                 is_active=True,
                 is_vision_capable=True

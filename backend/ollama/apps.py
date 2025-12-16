@@ -16,9 +16,6 @@ class OllamaConfig(AppConfig):
             return
 
         try:
-            # 导入后台任务确保它们被注册
-            from . import tasks  # noqa: F401
-
             # 初始化数据库连接优化
             from utils.db_utils import optimize_sqlite_connection
             optimize_sqlite_connection()

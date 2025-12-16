@@ -1,10 +1,10 @@
 """
 Ollama Views Package
 
-This package provides abstracted view handlers for Ollama endpoints and models.
-The main dispatcher is available in this module for backward compatibility.
+This package provides abstracted view handlers for Ollama analysis tasks.
+Endpoint and model management have been moved to the endpoint app.
 """
 
-from .dispatcher import OllamaEndpointViewSet, OllamaAIModelViewSet, OllamaAnalysisViewSet
+from .dispatcher import OllamaAnalysisViewSet
 
-__all__ = ['OllamaEndpointViewSet', 'OllamaAIModelViewSet', 'OllamaAnalysisViewSet']
+__all__ = ['OllamaAnalysisViewSet']

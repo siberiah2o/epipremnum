@@ -157,7 +157,7 @@ const ImageInfoPanel = ({
   analysisProgress: number;
   onAnalysis: () => void;
 }) => {
-  // 安全地获取分类和标签数据
+  // 安全地获取分类和标签数据 - 使用ai_前缀的字段
   const categories = selectedFile.ai_categories || [];
   const tags = selectedFile.ai_tags || [];
 
@@ -199,20 +199,18 @@ const ImageInfoPanel = ({
             <div className="flex items-center gap-2">
               <h3 className="font-semibold text-lg">{selectedFile.title}</h3>
               {(() => {
-                // 使用与分析状态面板相同的判断逻辑
+                // 判断是否有AI分析结果
                 const hasDescription = !!selectedFile.ai_description;
                 const hasCategories =
                   selectedFile.ai_categories &&
                   selectedFile.ai_categories.length > 0;
                 const hasTags =
                   selectedFile.ai_tags && selectedFile.ai_tags.length > 0;
-                const hasAnalyzedAt = !!selectedFile.ai_analyzed_at;
 
                 const hasAIResults =
                   hasDescription ||
                   hasCategories ||
-                  hasTags ||
-                  hasAnalyzedAt;
+                  hasTags;
 
                 return hasAIResults ? (
                   <Badge variant="secondary" className="text-xs">
@@ -227,47 +225,34 @@ const ImageInfoPanel = ({
               })()}
             </div>
 
-            {/* 描述 */}
-            {(selectedFile.description || selectedFile.ai_description) && (
-              <div className="grid grid-cols-1 gap-4">
-                {(selectedFile.description || selectedFile.ai_description) && (
-                  <div>
-                    <h4 className="font-medium text-sm mb-2 flex items-center gap-2">
-                      <FileText className="h-3 w-3" />
-                      {selectedFile.ai_description ? "AI描述" : "描述"}
-                      {selectedFile.ai_description && (
-                        <Badge variant="secondary" className="text-xs ml-2">
-                          AI
-                        </Badge>
-                      )}
-                    </h4>
-                    <div className="relative">
-                      <button
-                        onClick={() => {
-                          const description =
-                            selectedFile.ai_description ||
-                            selectedFile.description;
-                          copyToClipboard(
-                            description!,
-                            selectedFile.ai_description
-                              ? "AI描述已复制到剪贴板"
-                              : "描述已复制到剪贴板"
-                          );
-                        }}
-                        className="absolute top-2 right-2 p-1.5 rounded-md bg-background/80 hover:bg-background border shadow-sm transition-colors"
-                        title="复制描述"
-                      >
-                        <Copy className="h-3 w-3" />
-                      </button>
-                      <div className="text-sm text-muted-foreground font-mono bg-muted p-3 rounded-lg break-words leading-relaxed max-h-32 overflow-y-auto pr-10">
-                        {selectedFile.ai_description ||
-                          selectedFile.description}
-                      </div>
-                    </div>
+            {/* AI描述 */}
+            {selectedFile.ai_description && (
+              <div>
+                <h4 className="font-medium text-sm mb-2 flex items-center gap-2">
+                  <FileText className="h-3 w-3" />
+                  AI描述
+                  <Badge variant="secondary" className="text-xs ml-2">
+                    AI
+                  </Badge>
+                </h4>
+                <div className="relative">
+                  <button
+                    onClick={() => {
+                      copyToClipboard(
+                        selectedFile.ai_description!,
+                        "AI描述已复制到剪贴板"
+                      );
+                    }}
+                    className="absolute top-2 right-2 p-1.5 rounded-md bg-background/80 hover:bg-background border shadow-sm transition-colors"
+                    title="复制描述"
+                  >
+                    <Copy className="h-3 w-3" />
+                  </button>
+                  <div className="text-sm text-muted-foreground font-mono bg-muted p-3 rounded-lg break-words leading-relaxed max-h-32 overflow-y-auto pr-10">
+                    {selectedFile.ai_description}
                   </div>
-                )}
-
-                              </div>
+                </div>
+              </div>
             )}
 
             {/* 推荐分类和标签 */}

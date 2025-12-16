@@ -6,6 +6,7 @@ import time
 import requests
 from rest_framework import status
 from .base import BaseResponseHandler, BaseViewSetMixin
+from ..clients.client_factory import ClientFactory
 
 
 class ConnectionTestHandler(BaseViewSetMixin):
@@ -39,72 +40,24 @@ class ConnectionTestHandler(BaseViewSetMixin):
 
     def _perform_connection_test(self, endpoint, start_time):
         """Perform the actual connection test"""
-        connection_status = 'success'
-        error_message = None
-
         try:
-            # Test Ollama API basic connection
-            response = requests.get(
-                f"{endpoint.url.rstrip('/')}/api/version",
-                timeout=10
-            )
+            # 使用客户端工厂测试连接
+            test_result = ClientFactory.test_endpoint_connection(endpoint)
 
-            if response.status_code == 200:
-                end_time = time.time()
-                response_time = int((end_time - start_time) * 1000)
-
-                return {
-                    'status': 'success',
-                    'response_time': f'{response_time}ms',
-                    'message': f'端点连接测试成功，响应时间: {response_time}ms',
-                    'data': {
-                        'endpoint_id': endpoint.id,
-                        'connection_status': 'success',
-                        'response_time': f'{response_time}ms'
-                    }
-                }
-            else:
-                end_time = time.time()
-                response_time = int((end_time - start_time) * 1000)
-                connection_status = 'error'
-                error_message = f'HTTP {response.status_code}'
-
-                return {
-                    'status': 'error',
-                    'response_time': f'{response_time}ms',
-                    'message': f'端点连接失败: {error_message}',
-                    'data': {
-                        'endpoint_id': endpoint.id,
-                        'connection_status': 'error',
-                        'response_time': f'{response_time}ms'
-                    }
-                }
-
-        except requests.exceptions.Timeout:
             end_time = time.time()
             response_time = int((end_time - start_time) * 1000)
-            return {
-                'status': 'timeout',
-                'response_time': f'{response_time}ms',
-                'message': '端点连接测试超时',
-                'data': {
-                    'endpoint_id': endpoint.id,
-                    'connection_status': 'timeout',
-                    'response_time': f'{response_time}ms'
-                }
-            }
 
-        except requests.exceptions.ConnectionError:
-            end_time = time.time()
-            response_time = int((end_time - start_time) * 1000)
+            # 构造返回数据
             return {
-                'status': 'connection_error',
+                'status': 'success' if test_result['success'] else 'error',
                 'response_time': f'{response_time}ms',
-                'message': '端点连接失败：无法连接到指定URL',
+                'message': test_result['message'],
                 'data': {
                     'endpoint_id': endpoint.id,
-                    'connection_status': 'connection_error',
-                    'response_time': f'{response_time}ms'
+                    'provider': endpoint.provider,
+                    'connection_status': 'success' if test_result['success'] else 'error',
+                    'response_time': f'{response_time}ms',
+                    'details': test_result.get('details', {})
                 }
             }
 
@@ -117,6 +70,7 @@ class ConnectionTestHandler(BaseViewSetMixin):
                 'message': f'端点连接测试失败: {str(e)}',
                 'data': {
                     'endpoint_id': endpoint.id,
+                    'provider': endpoint.provider,
                     'connection_status': 'error',
                     'response_time': f'{response_time}ms'
                 }

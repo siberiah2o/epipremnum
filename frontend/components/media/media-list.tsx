@@ -787,18 +787,16 @@ export function MediaList({ onEdit, onView }: MediaListProps) {
                 >
                   {media.title}
                 </h4>
-                {(media.ai_description || media.description) && (
+                {media.description && (
                   <p
                     onClick={(e) => {
                       e.stopPropagation();
                       onView?.(media);
                     }}
                     className="text-sm text-muted-foreground line-clamp-2 cursor-pointer hover:text-foreground transition-colors"
-                    title={
-                      media.ai_description || media.description || undefined
-                    }
+                    title={media.description}
                   >
-                    {media.ai_description || media.description}
+                    {media.description}
                   </p>
                 )}
                 <div className="flex items-center gap-1 mt-1">

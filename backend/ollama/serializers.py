@@ -1,71 +1,15 @@
 from rest_framework import serializers
-from .models import OllamaEndpoint, OllamaAIModel, OllamaImageAnalysis
+from .models import OllamaImageAnalysis
 
-
-class OllamaEndpointSerializer(serializers.ModelSerializer):
-    """Ollama端点序列化器"""
-    created_by_username = serializers.CharField(source='created_by.username', read_only=True)
-
-    class Meta:
-        model = OllamaEndpoint
-        fields = (
-            'id', 'name', 'url', 'description', 'is_active', 'is_default',
-            'created_by', 'created_by_username', 'created_at', 'updated_at'
-        )
-        read_only_fields = ('id', 'created_by', 'created_at', 'updated_at')
-
-
-class OllamaEndpointCreateSerializer(serializers.ModelSerializer):
-    """创建Ollama端点序列化器"""
-    class Meta:
-        model = OllamaEndpoint
-        fields = ('name', 'url', 'description', 'is_default')
-        extra_kwargs = {
-            'description': {'required': False, 'allow_blank': True},
-            'is_default': {'default': False}
-        }
-
-
-class OllamaEndpointUpdateSerializer(serializers.ModelSerializer):
-    """更新Ollama端点序列化器"""
-    class Meta:
-        model = OllamaEndpoint
-        fields = ('name', 'url', 'description', 'is_active', 'is_default')
-        extra_kwargs = {
-            'description': {'required': False, 'allow_blank': True},
-            'is_default': {'default': False}
-        }
-
-
-class OllamaAIModelSerializer(serializers.ModelSerializer):
-    """Ollama模型序列化器"""
-    endpoint_name = serializers.CharField(source='endpoint.name', read_only=True)
-
-    class Meta:
-        model = OllamaAIModel
-        fields = (
-            'id', 'name', 'endpoint', 'endpoint_name', 'is_active', 'is_vision_capable',
-            'is_default', 'model_size', 'digest', 'modified_at', 'ollama_info',
-            'created_at', 'updated_at'
-        )
-        read_only_fields = ('id', 'digest', 'modified_at', 'created_at', 'updated_at')
-
-
-class OllamaAIModelCreateSerializer(serializers.ModelSerializer):
-    """创建Ollama模型序列化器"""
-    class Meta:
-        model = OllamaAIModel
-        fields = ('name', 'endpoint', 'is_active', 'is_vision_capable', 'is_default', 'ollama_info')
-        extra_kwargs = {
-            'ollama_info': {'required': False, 'default': dict}
-        }
-
-
-class OllamaAIModelUpdateSerializer(serializers.ModelSerializer):
-    """更新Ollama模型序列化器"""
-    class Meta:
-        model = OllamaAIModel
-        fields = ('is_active', 'is_vision_capable', 'is_default')
+# 导入已迁移的序列化器
+from endpoint.serializers import (
+    OllamaEndpointSerializer,
+    OllamaEndpointCreateSerializer,
+    OllamaEndpointUpdateSerializer,
+    OllamaAIModelSerializer,
+    OllamaAIModelCreateSerializer,
+    OllamaAIModelUpdateSerializer
+)
 
 
 # ==================== 图片分析相关序列化器 ====================

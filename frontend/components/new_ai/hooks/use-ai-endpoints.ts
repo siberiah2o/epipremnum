@@ -12,7 +12,7 @@ export const useAIEndpoints = () => {
   const fetchEndpoints = useCallback(async () => {
     try {
       setLoading(true);
-      const data = await apiRequest("/api/ollama/endpoints/");
+      const data = await apiRequest("/api/endpoint/endpoints/");
 
       // 检查是否是认证失败的响应
       if (data && data.authError) {
@@ -35,7 +35,7 @@ export const useAIEndpoints = () => {
   const createEndpoint = useCallback(
     async (data: CreateEndpointRequest) => {
       try {
-        const result = await apiRequest("/api/ollama/endpoints/", {
+        const result = await apiRequest("/api/endpoint/endpoints/", {
           method: "POST",
           body: JSON.stringify(data),
         });
@@ -62,8 +62,8 @@ export const useAIEndpoints = () => {
   const updateEndpoint = useCallback(
     async (id: number, data: CreateEndpointRequest) => {
       try {
-        const result = await apiRequest(`/api/ollama/endpoints/${id}/`, {
-          method: "PATCH",
+        const result = await apiRequest(`/api/endpoint/endpoints/${id}/`, {
+          method: "PUT",
           body: JSON.stringify(data),
         });
 
@@ -102,8 +102,8 @@ export const useAIEndpoints = () => {
       if (!confirm(confirmMessage)) return false;
 
       try {
-        const result = await apiRequest(`/api/ollama/endpoints/${endpoint.id}/delete/`, {
-          method: "POST",
+        const result = await apiRequest(`/api/endpoint/endpoints/${endpoint.id}/`, {
+          method: "DELETE",
         });
 
         // 检查是否是认证失败的响应
@@ -130,7 +130,7 @@ export const useAIEndpoints = () => {
       try {
         // 端点连接测试可能需要较长时间，设置30秒超时
         const result = await apiRequest(
-          `/api/ollama/endpoints/${endpointId}/test_connection/`,
+          `/api/endpoint/endpoints/${endpointId}/test_connection/`,
           {
             method: "POST",
           },

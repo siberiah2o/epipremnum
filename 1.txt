@@ -1,0 +1,2396 @@
+=== /root/dev/epipremnum/backend/workflow/admin.py ===
+from django.contrib import admin
+
+# Register your models here.
+
+
+
+=== /root/dev/epipremnum/backend/workflow/apps.py ===
+from django.apps import AppConfig
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+class WorkflowConfig(AppConfig):
+    default_auto_field = 'django.db.models.BigAutoField'
+    name = 'workflow'
+
+    def ready(self):
+        """应用启动时初始化"""
+        # 避免在迁移时运行
+        import sys
+        if 'migrate' in sys.argv or 'makemigrations' in sys.argv:
+            return
+
+        try:
+            # 初始化工作流相关组件
+            logger.info("✅ Workflow应用启动成功")
+        except Exception as e:
+            logger.warning(f"⚠️ Workflow应用启动初始化失败: {str(e)}")
+
+
+
+=== /root/dev/epipremnum/backend/workflow/batch_handler.py ===
+"""
+改进的批量处理器 - 简化版
+移除复杂的并发控制，只负责任务准备和结果整理
+"""
+
+import logging
+from typing import Dict, Any, List
+from django.db import transaction
+from .state_manager import state_manager
+
+logger = logging.getLogger(__name__)
+
+
+class SimplifiedBatchHandler:
+    """简化版批量处理器"""
+
+    def __init__(self):
+        self.max_batch_size = 50  # 增加批量大小
+
+    def prepare_tasks(self, user, media_ids, model_name=None, analysis_options=None, prompt=None):
+        """准备批量任务 - 简化版"""
+        from media.models import Media
+        from ollama.models import OllamaAIModel
+
+        valid_tasks = []
+        validation_errors = []
+
+        # 批量查询媒体文件
+        media_items = Media.objects.filter(
+            id__in=media_ids,
+            user=user
+        ).select_related('user')
+
+        # 检查缺失的媒体
+        found_ids = {m.id for m in media_items}
+        for media_id in media_ids:
+            if media_id not in found_ids:
+                validation_errors.append({
+                    'media_id': media_id,
+                    'error': '媒体文件不存在或无权访问'
+                })
+
+        # 获取模型
+        model = self._get_model(user, model_name)
+        if not model:
+            raise BatchValidationError("没有可用的分析模型")
+
+        # 批量创建分析任务
+        for media in media_items:
+            try:
+                analysis, created = state_manager.create_analysis_safely(
+                    media=media,
+                    model=model,
+                    analysis_options=analysis_options or {},
+                    prompt=prompt
+                )
+
+                valid_tasks.append(analysis)
+                logger.debug(f"创建分析任务: media_id={media.id}, analysis_id={analysis.id}")
+
+            except Exception as e:
+                validation_errors.append({
+                    'media_id': media.id,
+                    'error': f"创建分析任务失败: {str(e)}"
+                })
+
+        summary = {
+            'total_requested': len(media_ids),
+            'valid_tasks': len(valid_tasks),
+            'validation_errors': len(validation_errors)
+        }
+
+        return valid_tasks, validation_errors, summary
+
+    def _get_model(self, user, model_name=None):
+        """获取模型 - 简化版"""
+        from ollama.models import OllamaAIModel
+
+        queryset = OllamaAIModel.objects.filter(
+            endpoint__created_by=user,
+            is_active=True,
+            is_vision_capable=True
+        )
+
+        if model_name:
+            queryset = queryset.filter(name=model_name)
+
+        return queryset.filter(is_default=True).first() or queryset.first()
+
+    def analyze_images_with_concurrency_task(self, user_id, media_ids, model_name, analysis_options=None, prompt=None):
+        """
+        图片并发批量分析任务 - 简化版
+        直接使用并发管理器
+        """
+        logger.info(f"🚀 开始批量分析: {len(media_ids)} 张图片，用户: {user_id}")
+
+        try:
+            from django.contrib.auth import get_user_model
+            User = get_user_model()
+
+            # 获取用户
+            user = User.objects.get(id=user_id)
+
+            # 验证请求
+            validation_result = self.validate_request(media_ids, model_name, analysis_options)
+            if not validation_result['valid']:
+                return {
+                    'success': False,
+                    'error': f"批量请求验证失败: {'; '.join(validation_result['errors'])}"
+                }
+
+            # 准备任务
+            valid_tasks, validation_errors, summary = self.prepare_tasks(
+                user=user,
+                media_ids=media_ids,
+                model_name=model_name,
+                analysis_options=analysis_options,
+                prompt=prompt
+            )
+
+            if not valid_tasks:
+                return {
+                    'success': False,
+                    'error': '没有可处理的任务',
+                    'validation_errors': validation_errors
+                }
+
+            # 创建批量分析异步任务
+            from .task_workers import analyze_batch_task
+
+            analysis_ids = [task.id for task in valid_tasks]
+            max_concurrent = analysis_options.get('max_concurrent', 10) if analysis_options else 10
+
+            batch_task = analyze_batch_task.run_async(
+                user_id=user_id,
+                analysis_ids=analysis_ids,
+                model_name=model_name,
+                max_concurrent=max_concurrent
+            )
+
+            logger.info(f"✅ 批量分析任务已启动: task_id={batch_task.id}")
+
+            return {
+                'success': True,
+                'batch_started': True,
+                'batch_task_id': str(batch_task.id),
+                'summary': summary,
+                'analysis_ids': analysis_ids,
+                'max_concurrent': max_concurrent
+            }
+
+        except Exception as e:
+            logger.error(f"❌ 批量分析任务异常: {str(e)}")
+            return {
+                'success': False,
+                'error': f"批量分析任务异常: {str(e)}"
+            }
+
+    def validate_request(self, media_ids, model_name=None, analysis_options=None):
+        """验证批量请求参数"""
+        errors = []
+        warnings = []
+
+        # 验证媒体ID列表
+        if not media_ids or not isinstance(media_ids, list):
+            errors.append("media_ids 必须是非空数组")
+            return {'valid': False, 'errors': errors, 'warnings': warnings}
+
+        if len(media_ids) > self.max_batch_size:
+            errors.append(f"批量大小超过限制，最多支持 {self.max_batch_size} 个文件")
+
+        if len(media_ids) == 0:
+            errors.append("媒体ID列表不能为空")
+
+        # 检查重复ID
+        if len(media_ids) != len(set(media_ids)):
+            warnings.append("媒体ID列表中包含重复项")
+
+        # 验证并发控制参数
+        analysis_options = analysis_options or {}
+        if 'max_concurrent' in analysis_options:
+            max_concurrent = analysis_options['max_concurrent']
+            if not isinstance(max_concurrent, int) or not 1 <= max_concurrent <= 10:
+                errors.append('max_concurrent必须在1-10之间')
+
+        # 验证模型名称
+        if model_name and not isinstance(model_name, str):
+            errors.append("模型名称必须是字符串")
+
+        return {
+            'valid': len(errors) == 0,
+            'errors': errors,
+            'warnings': warnings,
+            'media_count': len(media_ids)
+        }
+
+    def execute_processing(self, user, valid_tasks, analysis_options):
+        """简化的批量执行处理"""
+        from .concurrency_manager import concurrency_manager
+
+        media_ids = [task.media.id for task in valid_tasks]
+
+        return concurrency_manager.process_batch_images(
+            user_id=user.id,
+            media_ids=media_ids,
+            model_name=valid_tasks[0].model.name,
+            analysis_options=analysis_options
+        )
+
+
+class BatchError(Exception):
+    """批量处理错误基类"""
+    pass
+
+
+class BatchValidationError(BatchError):
+    """批量处理验证错误"""
+    pass
+
+
+# 更新全局实例
+batch_handler = SimplifiedBatchHandler()
+
+
+=== /root/dev/epipremnum/backend/workflow/concurrency_manager.py ===
+"""
+改进的并发分析管理器 - 简化版
+只负责图片级并发，图片内并行由analyzer处理
+"""
+
+import asyncio
+import logging
+import time
+import threading
+from typing import Dict, Any, List
+from concurrent.futures import ThreadPoolExecutor
+from django.conf import settings
+
+logger = logging.getLogger(__name__)
+
+
+class SimplifiedConcurrencyManager:
+    """简化版并发管理器 - 只控制图片级并发"""
+
+    def __init__(self):
+        # 全局线程池，替代复杂的用户级线程池
+        self.executor = ThreadPoolExecutor(
+            max_workers=getattr(settings, 'OLLAMA_GLOBAL_MAX_CONCURRENT', 10),
+            thread_name_prefix="ollama_worker"
+        )
+
+        # 活跃任务跟踪
+        self.active_tasks = {}
+        self._lock = threading.RLock()
+
+        logger.info("🔧 简化版并发管理器初始化完成")
+
+    def process_batch_images(self, user_id, media_ids, model_name, analysis_options, executor_callback=None):
+        """
+        批量处理图片 - 简化版
+        使用全局线程池，每张图片独立处理
+        """
+        from ollama.models import OllamaImageAnalysis
+
+        logger.info(f"🚀 开始批量处理: {len(media_ids)} 个图片，用户 {user_id}")
+
+        # 获取所有分析对象
+        analyses = OllamaImageAnalysis.objects.filter(
+            media_id__in=media_ids,
+            media__user_id=user_id,
+            status__in=['pending', 'processing']
+        ).select_related('media', 'model')
+
+        results = {}
+        failed_items = []
+        futures = []
+
+        # 提交所有任务到线程池
+        for analysis in analyses:
+            try:
+                future = self.executor.submit(
+                    self._process_single_image_simplified,
+                    analysis
+                )
+                futures.append((future, analysis.media.id))
+
+                with self._lock:
+                    self.active_tasks[future] = {
+                        'user_id': user_id,
+                        'media_id': analysis.media.id
+                    }
+
+            except Exception as e:
+                failed_items.append({
+                    'media_id': analysis.media.id,
+                    'error': f"提交任务失败: {str(e)}"
+                })
+
+        # 等待所有任务完成
+        for future, media_id in futures:
+            try:
+                result = future.result(timeout=getattr(settings, 'OLLAMA_ANALYSIS_TIMEOUT', 300))
+
+                if result['success']:
+                    results[media_id] = {
+                        'success': True,
+                        'status': 'completed'
+                    }
+                else:
+                    failed_items.append({
+                        'media_id': media_id,
+                        'error': result.get('error', '未知错误')
+                    })
+
+            except Exception as e:
+                failed_items.append({
+                    'media_id': media_id,
+                    'error': f"任务执行异常: {str(e)}"
+                })
+
+            finally:
+                with self._lock:
+                    self.active_tasks.pop(future, None)
+
+        logger.info(f"📊 批量处理完成: 成功 {len(results)} 个，失败 {len(failed_items)} 个")
+
+        return {
+            'success_count': len(results),
+            'error_count': len(failed_items),
+            'results': results,
+            'failed_items': failed_items
+        }
+
+    def _process_single_image_simplified(self, analysis):
+        """
+        处理单张图片 - 简化版
+        使用增强版分析器的并行处理
+        """
+        from .state_manager import state_manager
+        from .ollama_client import OllamaImageAnalyzer
+
+        try:
+            # 更新状态为处理中
+            state_manager.update_analysis_status(
+                analysis_id=analysis.id,
+                from_status='pending',
+                to_status='processing'
+            )
+
+            # 使用增强版分析器（并行处理）
+            analyzer = OllamaImageAnalyzer()
+            result = analyzer.analyze_parallel(analysis)
+
+            if result['success']:
+                # 更新媒体信息
+                state_manager.update_media_with_analysis_result(
+                    analysis, result['result']
+                )
+
+                # 更新任务状态
+                state_manager.update_analysis_status(
+                    analysis_id=analysis.id,
+                    from_status='processing',
+                    to_status='completed',
+                    analysis_results=result['result'],
+                    processing_time=result.get('processing_time_ms')
+                )
+
+                return {
+                    'success': True,
+                    'media_id': analysis.media.id,
+                    'result': result['result']
+                }
+            else:
+                # 标记失败
+                state_manager.update_analysis_status(
+                    analysis_id=analysis.id,
+                    from_status='processing',
+                    to_status='failed',
+                    error_message=result.get('error', '分析失败')
+                )
+
+                return {
+                    'success': False,
+                    'media_id': analysis.media.id,
+                    'error': result.get('error', '分析失败')
+                }
+
+        except Exception as e:
+            logger.error(f"❌ 处理图片失败: media_id={analysis.media.id}, error={str(e)}")
+
+            # 确保任务被标记为失败
+            try:
+                state_manager.update_analysis_status(
+                    analysis_id=analysis.id,
+                    from_status=None,
+                    to_status='failed',
+                    error_message=str(e)
+                )
+            except:
+                pass
+
+            return {
+                'success': False,
+                'media_id': analysis.media.id,
+                'error': str(e)
+            }
+
+    def cancel_user_tasks(self, user_id: int) -> Dict[str, Any]:
+        """取消用户的所有任务"""
+        cancelled_count = 0
+
+        with self._lock:
+            # 找到该用户的所有活动任务
+            user_futures = [
+                future for future, info in self.active_tasks.items()
+                if info['user_id'] == user_id
+            ]
+
+            # 尝试取消未开始的任务
+            for future in user_futures:
+                if not future.running():
+                    if future.cancel():
+                        cancelled_count += 1
+
+        # 简化版取消逻辑 - 只需要标记数据库中的任务状态
+        pass
+
+        logger.info(f"🚫 用户 {user_id} 任务取消完成: {cancelled_count} 个")
+
+        return {
+            'cancelled_count': cancelled_count
+        }
+
+    def get_active_tasks_info(self) -> Dict[str, Any]:
+        """获取当前活跃任务信息"""
+        with self._lock:
+            user_task_counts = {}
+            for info in self.active_tasks.values():
+                user_id = info['user_id']
+                user_task_counts[user_id] = user_task_counts.get(user_id, 0) + 1
+
+            return {
+                'total_active_tasks': len(self.active_tasks),
+                'user_task_counts': user_task_counts,
+                'max_workers': self.executor._max_workers
+            }
+
+    def shutdown(self):
+        """关闭管理器"""
+        logger.info("🛑 关闭简化版并发管理器...")
+        self.executor.shutdown(wait=False)
+        logger.info("✅ 简化版并发管理器已关闭")
+
+
+# 替换全局实例
+concurrency_manager = SimplifiedConcurrencyManager()
+
+
+=== /root/dev/epipremnum/backend/workflow/models.py ===
+from django.db import models
+
+# Create your models here.
+
+
+
+=== /root/dev/epipremnum/backend/workflow/ollama_client.py ===
+"""
+Ollama图片分析客户端 - 使用LangChain重构
+简化实现，利用LangChain的异步支持和并发管理
+"""
+import base64
+import logging
+import time
+from typing import Dict, Any, List, Optional
+from django.conf import settings
+from django.core.cache import cache
+from langchain_core.messages import HumanMessage
+from langchain_core.runnables import RunnableParallel, RunnableLambda
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.language_models.chat_models import BaseChatModel
+from .prompt_templates import PromptTemplates, TaskConfig
+
+logger = logging.getLogger(__name__)
+
+
+class LangChainImageAnalyzer:
+    """基于LangChain的图片分析器"""
+
+    def __init__(self):
+        self.timeout = getattr(settings, 'OLLAMA_ANALYSIS_TIMEOUT', 300)
+        self.image_cache_ttl = 600  # 图片缓存10分钟
+
+    def analyze_parallel(self, analysis) -> Dict[str, Any]:
+        """
+        并行执行单张图片的所有分析任务
+        使用LangChain的RunnableParallel进行并发处理
+        """
+        try:
+            # 验证输入
+            self._validate_input(analysis)
+
+            # 提取分析数据
+            analysis_data = self._extract_analysis_data(analysis)
+
+            # 获取需要执行的任务
+            enabled_tasks = TaskConfig.get_enabled_tasks(analysis_data['options'])
+            if not enabled_tasks:
+                enabled_tasks = TaskConfig.get_default_tasks()
+
+            # 准备图片数据（带缓存）
+            image_base64 = self._get_cached_image_data(analysis)
+
+            # 获取LangChain客户端
+            client = self._get_langchain_client(analysis_data['endpoint_url'], analysis_data['model_name'])
+
+            # 获取用户自定义提示词（如果有）
+            custom_prompt = getattr(analysis, 'prompt', None)
+
+            # 构建并行任务链
+            parallel_chain = self._build_parallel_chain(client, enabled_tasks, analysis_data['options'], custom_prompt)
+
+            # 执行并行分析
+            start_time = time.time()
+            results = parallel_chain.invoke({
+                "image_base64": image_base64,
+                "image_path": analysis.media.file.path
+            })
+
+            # Debug: 打印并行执行结果
+            logger.info(f"=== AI原始响应结果 ===")
+            for task_type, result in results.items():
+                logger.info(f"Task {task_type}: type={type(result)}, value={result}")
+                # 如果是字符串，记录长度
+                if isinstance(result, str):
+                    logger.info(f"  - 字符串长度: {len(result)}")
+                    logger.info(f"  - 前100字符: {result[:100]}")
+            logger.info(f"=== 响应结果结束 ===")
+
+            # 处理结果
+            return self._process_results(results, enabled_tasks, analysis, start_time)
+
+        except Exception as e:
+            logger.error(f"并行分析失败: {str(e)}")
+            return {'success': False, 'error': f'分析失败: {str(e)}'}
+
+    def _get_langchain_client(self, endpoint_url: str, model_name: str) -> BaseChatModel:
+        """获取LangChain客户端"""
+        from ollama.clients.client_factory import ClientFactory
+        from ollama.models import OllamaEndpoint
+
+        # 获取端点信息
+        endpoint = OllamaEndpoint.objects.get(url=endpoint_url)
+
+        # 创建客户端
+        client = ClientFactory.create_client(endpoint)
+        if not client:
+            raise ValueError(f"无法创建 {endpoint.provider} 客户端")
+
+        # 返回LangChain模型实例
+        return client.get_langchain_model(model_name)
+
+    def _build_parallel_chain(self, client: BaseChatModel, tasks: List[str], options: Dict[str, Any], custom_prompt: Optional[str] = None):
+        """构建并行分析链"""
+        chain_dict = {}
+
+        for task_type in tasks:
+            # 创建任务特定的提示词
+            prompt = self._create_task_prompt(task_type, options, custom_prompt)
+
+            # 创建分析链
+            chain = (
+                {
+                    "image_base64": lambda x: x["image_base64"],
+                    "prompt": lambda x: prompt,
+                    "image_path": lambda x: x["image_path"]
+                }
+                | RunnableLambda(lambda x: self._prepare_messages(x))
+                | client
+                | StrOutputParser()
+                | RunnableLambda(lambda x: self._process_single_result(x, task_type))
+            )
+
+            chain_dict[task_type] = chain
+
+        # 创建并行链
+        return RunnableParallel(**chain_dict)
+
+    def _prepare_messages(self, inputs: Dict[str, Any]) -> List[HumanMessage]:
+        """准备LangChain消息"""
+        return [
+            HumanMessage(
+                content=[
+                    {
+                        "type": "text",
+                        "text": inputs["prompt"]
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{inputs['image_base64']}"
+                        }
+                    }
+                ]
+            )
+        ]
+
+    def _create_task_prompt(self, task_type: str, options: Dict[str, Any], custom_prompt: Optional[str] = None) -> str:
+        """创建任务特定的提示词"""
+        # 如果有自定义提示词，优先使用
+        if custom_prompt:
+            logger.info(f"Task: {task_type}, 使用自定义提示词: {custom_prompt[:200]}...")
+            return custom_prompt
+
+        # 否则使用默认的模板提示词
+        prompt = TaskConfig.get_task_prompt(
+            task_type,
+            options.get(f'max_{task_type}') if task_type in ['categories', 'tags'] else None
+        )
+        # 添加调试日志
+        logger.info(f"Task: {task_type}, 提示词: {prompt}")
+        return prompt
+
+    def _get_cached_image_data(self, analysis) -> str:
+        """获取或缓存图片数据"""
+        cache_key = f'image_b64_{analysis.media.id}'
+
+        # 尝试从缓存获取
+        cached = cache.get(cache_key)
+        if cached:
+            return cached
+
+        # 读取并编码图片
+        analysis.media.file.seek(0)
+        image_content = analysis.media.file.read()
+        image_base64 = base64.b64encode(image_content).decode('utf-8')
+        analysis.media.file.seek(0)
+
+        # 缓存结果
+        cache.set(cache_key, image_base64, timeout=self.image_cache_ttl)
+        return image_base64
+
+    def _extract_analysis_data(self, analysis) -> Dict[str, Any]:
+        """提取分析所需的数据"""
+        # 如果 model 为 None，尝试获取默认端点和模型
+        if not analysis.model:
+            from ollama.models import OllamaEndpoint, OllamaAIModel
+            try:
+                # 获取用户的默认端点
+                default_endpoint = OllamaEndpoint.objects.filter(
+                    created_by=analysis.media.uploaded_by,
+                    is_default=True,
+                    is_active=True
+                ).first()
+
+                if not default_endpoint:
+                    raise ValueError("未找到活跃的默认端点")
+
+                # 获取默认模型（必须支持视觉）
+                default_model = OllamaAIModel.objects.filter(
+                    endpoint=default_endpoint,
+                    is_active=True,
+                    is_vision_capable=True
+                ).first()
+
+                if not default_model:
+                    raise ValueError("端点中没有支持图片分析的模型")
+
+                endpoint_url = default_endpoint.url
+                model_name = default_model.name
+            except Exception as e:
+                logger.error(f"无法获取默认模型: {str(e)}")
+                raise ValueError(f"分析配置错误: {str(e)}")
+        else:
+            endpoint_url = analysis.model.endpoint.url
+            model_name = analysis.model.name
+
+        return {
+            'options': dict(analysis.analysis_options) if analysis.analysis_options else {},
+            'endpoint_url': endpoint_url,
+            'model_name': model_name,
+            'media_id': analysis.media.id,
+        }
+
+    def _validate_input(self, analysis):
+        """验证输入"""
+        if not analysis.media or not analysis.media.file:
+            raise Exception('媒体文件不存在')
+
+        if not analysis.model or not analysis.model.is_vision_capable:
+            raise Exception('模型不支持视觉分析')
+
+        if not analysis.model.endpoint.is_active:
+            raise Exception('模型端点未激活')
+
+        # 检查是否为图片文件
+        image_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff'}
+        file_extension = analysis.media.file.name.lower().split('.')[-1]
+        if f'.{file_extension}' not in image_extensions:
+            raise Exception('只支持图片文件分析')
+
+    def _process_single_result(self, response_text, task_type: str):
+        """处理单个任务的分析结果"""
+        # 处理列表格式的响应（某些模型的特殊响应）
+        if isinstance(response_text, list):
+            # 对于所有任务类型，如果返回的是列表，先转换成字符串
+            response_text = ' '.join(str(item) for item in response_text)
+        else:
+            # 确保是字符串
+            response_text = str(response_text).strip()
+
+        # 处理智谱AI思考模型的响应格式
+        answer_markers = ['现在回答：', '现在:', '最终答案：', '最终:', '答案是：', '答案:']
+        for marker in answer_markers:
+            if marker in response_text:
+                parts = response_text.split(marker)
+                if len(parts) > 1:
+                    response_text = parts[-1].strip()
+                    break
+
+        # 清理思考过程
+        if ('用户现在需要' in response_text or '现在需要' in response_text) and len(response_text) > 200:
+            lines = response_text.split('\n')
+            final_lines = []
+            for line in reversed(lines):
+                line = line.strip()
+                if not line:
+                    continue
+                if any(keyword in line for keyword in ['用户现在需要', '现在需要', '首先看', '然后', '接下来']):
+                    continue
+                if (len(line) > 5 and
+                    not any(keyword in line for keyword in ['需要', '请', '要求', '长度', '避免', '包含', '客观'])):
+                    final_lines.insert(0, line)
+                elif final_lines:
+                    break
+
+            if final_lines:
+                response_text = '\n'.join(final_lines[:3])
+
+        # 根据任务类型处理不同的响应格式
+        if task_type == 'title':
+            # 检查是否是逗号分隔的词语（错误格式）
+            if ',' in response_text and len(response_text.split(',')) > 3:
+                # 如果是很多词用逗号分隔，取前几个作为标题
+                words = [w.strip() for w in response_text.split(',')[:5]]
+                return ' '.join(words)
+
+            # 提取标题
+            lines = response_text.split('\n')
+            title = ''
+            for line in lines:
+                line = line.strip()
+                if line and not line.startswith(('标题：', '标题:', 'Title:', '用户现在需要', '现在')):
+                    title = line
+                    break
+
+            for prefix in ['标题：', '标题:', 'Title:', 'title:']:
+                if title.startswith(prefix):
+                    title = title[len(prefix):].strip()
+            return title[:50]
+
+        elif task_type == 'description':
+            # 检查是否是简短的词列表（错误格式）
+            words = response_text.split()
+            if len(words) <= 15 and len(words) > 0 and len(response_text) < 100:
+                # 可能是词列表，转换为描述
+                if '、' in response_text or ',' in response_text:
+                    # 如果是用顿号或逗号分隔的词
+                    separators = ['、', ',', ' ']
+                    items = []
+                    for sep in separators:
+                        if sep in response_text:
+                            items = [item.strip() for item in response_text.split(sep) if item.strip()]
+                            break
+                    if len(items) > 3:
+                        # 组合成更自然的描述
+                        desc = f"图片中包含了{items[0]}"
+                        if len(items) > 1:
+                            desc += f"、{items[1]}"
+                        if len(items) > 2:
+                            desc += f"等元素"
+                        # 尝试推断场景
+                        if any(word in response_text for word in ['男子', '男性', '女人', '女性']):
+                            desc += "，画面中有人物"
+                        if any(word in response_text for word in ['室外', '户外', '自然光']):
+                            desc += "，场景位于室外"
+                        return desc + "。"
+                    elif len(items) > 1:
+                        return f"这是一张展示{'、'.join(items[:-1])}和{items[-1]}的图片。"
+                return f"这是一张展示{response_text}的图片。"
+
+            # 提取描述
+            lines = response_text.split('\n')
+            description_lines = []
+            for line in lines:
+                line = line.strip()
+                if (line and
+                    not line.startswith(('标题：', 'Tags:', '分类：')) and
+                    not any(word in line for word in ['用户现在需要', '需要', '请', '要求', '长度', '避免'])):
+                    description_lines.append(line)
+            return ' '.join(description_lines)[:500]
+
+        elif task_type in ['categories', 'tags']:
+            # 提取列表
+            result = []
+            if ',' in response_text:
+                result = [item.strip() for item in response_text.split(',')]
+            else:
+                lines = response_text.split('\n')
+                result = [line.strip() for line in lines if line.strip()]
+
+            # 过滤和清理
+            filtered_result = []
+            for item in result:
+                import re
+                item = re.sub(r'^\d+[\.\)]\s*', '', item)
+                for prefix in ['标签：', 'Tags:', '分类：', 'Categories:', '- ', '• ']:
+                    if item.startswith(prefix):
+                        item = item[len(prefix):].strip()
+                if item and len(item) <= 20:
+                    filtered_result.append(item)
+
+            return filtered_result
+
+        return response_text
+
+    def _process_results(self, results: Dict[str, Any], enabled_tasks: List[str], analysis, start_time: float) -> Dict[str, Any]:
+        """处理并行结果"""
+        processed_results = {}
+        failed_tasks = []
+
+        for task_type in enabled_tasks:
+            if task_type in results and results[task_type]:
+                try:
+                    # 确保结果不是嵌套的
+                    result = results[task_type]
+
+                    # 处理可能的嵌套列表（LangChain 有时会返回嵌套结构）
+                    if isinstance(result, list) and len(result) == 1 and isinstance(result[0], list):
+                        result = result[0]
+
+                    # 根据任务类型处理结果
+                    if task_type in ['categories', 'tags']:
+                        # 对于 tags 和 categories，确保是字符串列表
+                        if isinstance(result, list):
+                            result = [str(item) for item in result if item]
+                        else:
+                            result = [str(result)]
+                    else:
+                        # 对于 title 和 description，确保是字符串
+                        # 注意：_process_single_result 已经处理了列表情况，这里只需要确保是字符串
+                        if isinstance(result, list):
+                            # 理论上不应该到这里，但以防万一
+                            result = ' '.join(str(r) for r in result)
+                        else:
+                            result = str(result)
+
+                    logger.debug(f"Processed {task_type} result: {type(result)} - {result}")
+                    processed_results[task_type] = result
+                except Exception as e:
+                    logger.error(f"Error processing {task_type}: {str(e)}")
+                    failed_tasks.append(f"{task_type}: 结果处理失败 - {str(e)}")
+            else:
+                failed_tasks.append(f"{task_type}: 无返回结果")
+
+        # 汇总结果
+        final_result = self._combine_results(processed_results, analysis.analysis_options)
+        processing_time = int((time.time() - start_time) * 1000)
+
+        return {
+            'success': len(processed_results) > 0,
+            'result': final_result,
+            'processing_time_ms': processing_time,
+            'model_used': analysis.model.name if analysis.model else 'default',
+            'endpoint_used': analysis.model.endpoint.name if analysis.model else 'default',
+            'partial_results': processed_results,
+            'failed_tasks': failed_tasks if failed_tasks else None
+        }
+
+    def _combine_results(self, results: Dict[str, Any], options: Dict[str, Any]) -> Dict[str, Any]:
+        """汇总多个分析任务的结果"""
+        combined = {
+            'title': '',
+            'description': '',
+            'categories': [],
+            'tags': [],
+            'analysis_options': options
+        }
+
+        # 合并结果
+        if 'title' in results:
+            combined['title'] = results['title']
+        elif options.get('generate_title'):
+            combined['title'] = '标题分析失败'
+
+        if 'description' in results:
+            combined['description'] = results['description']
+        elif options.get('generate_description'):
+            combined['description'] = '描述分析失败'
+
+        if 'categories' in results:
+            combined['categories'] = results['categories']
+        elif options.get('generate_categories'):
+            combined['categories'] = []
+
+        if 'tags' in results:
+            combined['tags'] = results['tags']
+        elif options.get('generate_tags'):
+            combined['tags'] = []
+
+        return combined
+
+    # 向后兼容的同步方法
+    def analyze(self, analysis) -> Dict[str, Any]:
+        """向后兼容的同步分析"""
+        return self.analyze_parallel(analysis)
+
+
+# 保持向后兼容的别名
+OllamaImageAnalyzer = LangChainImageAnalyzer
+
+
+=== /root/dev/epipremnum/backend/workflow/prompt_templates.py ===
+"""
+图片分析提示词模板
+提供各种分析任务的提示词生成器
+使用LangChain的PromptTemplate增强功能
+"""
+
+from langchain_core.prompts import PromptTemplate, ChatPromptTemplate
+from langchain_core.messages import HumanMessage
+from typing import Dict, Any, Optional
+
+
+class LangChainPromptTemplates:
+    """使用LangChain的图片分析提示词模板类"""
+
+    @staticmethod
+    def title_prompt_template() -> PromptTemplate:
+        """生成标题分析的PromptTemplate"""
+        template = """请为这张图片生成一个准确的标题。
+
+这个标题将用于：
+1. 作为图片的文件名或索引名称
+2. 帮助用户快速识别图片内容
+3. 便于搜索和检索
+
+要求：
+- 标题要准确描述图片的核心内容
+- 使用简洁、清晰的语言
+- 长度控制在5-20个字之间
+- 避免使用"图片"、"照片"等通用词
+- 重点描述主要对象、场景或事件
+
+请直接返回标题，不要包含任何解释。"""
+        return PromptTemplate(
+            input_variables=[],
+            template=template
+        )
+
+    @staticmethod
+    def description_prompt_template() -> PromptTemplate:
+        """生成描述分析的PromptTemplate"""
+        template = """请详细描述这张图片的内容。
+
+这个描述将用于：
+1. AI反向生成或还原相似图片
+2. 为图片打标签和分类的参考
+3. 图片搜索和内容理解
+
+要求：
+- 详细描述所有可见的元素、对象、场景
+- 包含位置关系、空间布局信息
+- 描述颜色、光影、材质等视觉特征
+- 说明人物的动作、表情、服装等细节
+- 描述环境、背景、氛围等信息
+- 长度控制在50-500字之间
+- 使用客观、准确的语言，避免主观评价
+- 包含足够的细节以便于AI理解和重现
+
+请直接返回描述内容，不要包含任何分析过程。"""
+        return PromptTemplate(
+            input_variables=[],
+            template=template
+        )
+
+    @staticmethod
+    def categories_prompt_template(max_categories: int) -> PromptTemplate:
+        """生成分类分析的PromptTemplate"""
+        template = """请为这张图片生成准确的分类。
+
+分类用于：
+1. 组织和管理图片库
+2. 快速筛选和查找特定类型的内容
+3. 建立内容分类体系
+
+要求：
+- 根据图片主要内容确定分类
+- 分类要具有概括性和代表性
+- 生成最多{max_categories}个分类
+- 使用通用的、易于理解的分类名称
+- 每个分类2-6个字
+- 优先考虑主要分类，再考虑次要分类
+- 避免过于具体或过于宽泛的分类
+
+常见的分类示例：
+- 风景类：自然风光、城市景观、建筑、海洋、山脉等
+- 人物类：人物肖像、团体照、活动照片等
+- 物品类：美食、动物、植物、交通工具、科技产品等
+- 艺术类：绘画、雕塑、设计、摄影作品等
+- 场景类：室内、室外、工作、休闲、运动等
+
+请用逗号分隔返回分类列表。"""
+        return PromptTemplate(
+            input_variables=["max_categories"],
+            template=template
+        )
+
+    @staticmethod
+    def tags_prompt_template(max_tags: int) -> PromptTemplate:
+        """生成标签分析的PromptTemplate"""
+        template = """请为这张图片提取精准的关键词标签。
+
+标签用于：
+1. 精确标记图片的具体内容
+2. 支持多维度搜索和筛选
+3. 与相似内容建立关联
+4. AI内容理解和推荐
+
+要求：
+- 提取图片中的所有关键元素
+- 生成最多{max_tags}个标签
+- 标签要具体、准确、有代表性
+- 每个标签1-4个字
+- 包括但不限于：
+  * 主要对象（人物、动物、物品等）
+  * 环境场景（室内、室外、具体地点等）
+  * 动作状态（坐、立、运动等）
+  * 颜色特征（红色、蓝色、多彩等）
+  * 情感氛围（快乐、安静、紧张等）
+  * 风格特点（复古、现代、艺术等）
+  * 技术特征（特写、远景、黑白等）
+- 避免使用主观评价标签
+- 优先使用能被其他用户理解的通用词汇
+
+请用逗号分隔返回标签列表。"""
+        return PromptTemplate(
+            input_variables=["max_tags"],
+            template=template
+        )
+
+    @staticmethod
+    def multimodal_prompt_template(text_prompt: str) -> ChatPromptTemplate:
+        """生成多模态分析的ChatPromptTemplate"""
+        return ChatPromptTemplate.from_messages([
+            ("human", [
+                {
+                    "type": "text",
+                    "text": text_prompt
+                },
+                {
+                    "type": "image_url",
+                    "image_url": "data:image/jpeg;base64,{image_base64}"
+                }
+            ])
+        ])
+
+    @staticmethod
+    def few_shot_prompt_template(base_prompt: str, examples: list) -> ChatPromptTemplate:
+        """生成包含示例的Few-shot PromptTemplate"""
+        messages = [("system", "你是一个专业的图片分析师，请根据示例的格式回答。")]
+
+        # 添加示例
+        for example in examples:
+            messages.append(("human", example["input"]))
+            messages.append(("ai", example["output"]))
+
+        # 添加实际的问题
+        messages.append(("human", base_prompt))
+
+        return ChatPromptTemplate.from_messages(messages)
+
+
+class PromptTemplates:
+    """图片分析提示词模板类（向后兼容）"""
+
+    @staticmethod
+    def title_prompt():
+        """生成标题分析的提示词"""
+        return LangChainPromptTemplates.title_prompt_template().template
+
+    @staticmethod
+    def description_prompt():
+        """生成描述分析的提示词"""
+        return LangChainPromptTemplates.description_prompt_template().template
+
+    @staticmethod
+    def categories_prompt(max_categories):
+        """生成分类分析的提示词"""
+        return LangChainPromptTemplates.categories_prompt_template(max_categories).format(max_categories=max_categories)
+
+    @staticmethod
+    def tags_prompt(max_tags):
+        """生成标签分析的提示词"""
+        return LangChainPromptTemplates.tags_prompt_template(max_tags).format(max_tags=max_tags)
+
+    @staticmethod
+    def default_tags_prompt():
+        """生成默认标签分析提示词（用于默认分析）"""
+        return LangChainPromptTemplates.tags_prompt_template(5).format(max_tags=5)
+
+
+class TaskConfig:
+    """分析任务配置类"""
+
+    # 任务类型映射
+    TASK_TYPES = {
+        'title': {
+            'name': '标题生成',
+            'prompt_method': PromptTemplates.title_prompt,
+            'langchain_template_method': LangChainPromptTemplates.title_prompt_template,
+            'default_max': None
+        },
+        'description': {
+            'name': 'AI描述生成',
+            'prompt_method': PromptTemplates.description_prompt,
+            'langchain_template_method': LangChainPromptTemplates.description_prompt_template,
+            'default_max': None
+        },
+        'categories': {
+            'name': '分类生成',
+            'prompt_method': PromptTemplates.categories_prompt,
+            'langchain_template_method': LangChainPromptTemplates.categories_prompt_template,
+            'default_max': 5
+        },
+        'tags': {
+            'name': '标签生成',
+            'prompt_method': PromptTemplates.tags_prompt,
+            'langchain_template_method': LangChainPromptTemplates.tags_prompt_template,
+            'default_max': 10
+        }
+    }
+
+    # 默认任务配置（当用户没有指定任何选项时）
+    DEFAULT_TASKS = ['title', 'description', 'tags']
+
+    @classmethod
+    def get_task_prompt(cls, task_type: str, max_value: Optional[int] = None) -> str:
+        """获取指定任务的提示词"""
+        if task_type not in cls.TASK_TYPES:
+            raise ValueError(f"不支持的任务类型: {task_type}")
+
+        task_config = cls.TASK_TYPES[task_type]
+        prompt_method = task_config['prompt_method']
+
+        if max_value is None:
+            max_value = task_config['default_max']
+
+        if max_value is not None:
+            return prompt_method(max_value)
+        else:
+            return prompt_method()
+
+    @classmethod
+    def get_langchain_template(cls, task_type: str, max_value: Optional[int] = None) -> PromptTemplate:
+        """获取指定任务的LangChain PromptTemplate"""
+        if task_type not in cls.TASK_TYPES:
+            raise ValueError(f"不支持的任务类型: {task_type}")
+
+        task_config = cls.TASK_TYPES[task_type]
+        template_method = task_config['langchain_template_method']
+
+        if max_value is None:
+            max_value = task_config['default_max']
+
+        if max_value is not None:
+            return template_method(max_value)
+        else:
+            return template_method()
+
+    @classmethod
+    def get_multimodal_template(cls, prompt: str) -> ChatPromptTemplate:
+        """获取多模态ChatPromptTemplate"""
+        return LangChainPromptTemplates.multimodal_prompt_template(prompt)
+
+    @classmethod
+    def get_enabled_tasks(cls, options: Dict[str, Any]) -> list:
+        """根据用户选项获取需要执行的任务列表"""
+        tasks = []
+        for task_type in cls.TASK_TYPES:
+            if options.get(f'generate_{task_type}', False):
+                tasks.append(task_type)
+        return tasks
+
+    @classmethod
+    def get_default_tasks(cls) -> list:
+        """获取默认任务列表"""
+        return cls.DEFAULT_TASKS.copy()
+
+
+=== /root/dev/epipremnum/backend/workflow/state_manager.py ===
+"""
+原子状态管理器
+提供数据库事务保护和原子性状态操作
+"""
+
+import logging
+import time
+import random
+from typing import Dict, Any, Optional, List
+from django.db import transaction, models, DatabaseError
+from django.db.models import F, Q
+from django.core.cache import cache
+from django.utils import timezone
+
+from utils.request_queue import throttle_db_write
+
+logger = logging.getLogger(__name__)
+
+
+class StateManager:
+    """原子状态管理器"""
+
+    def __init__(self):
+        self.cache_timeout = 30  # 30秒缓存超时，提高实时性
+        self.max_retries = 5  # 增加最大重试次数，应对高并发
+        self.base_delay = 0.05  # 减少基础延迟时间，加快重试
+        self.max_total_delay = 5.0  # 最大总延迟时间（秒）
+
+    def _retry_with_backoff(self, func, *args, **kwargs):
+        """
+        带指数退避的重试机制
+        主要用于处理数据库锁定问题
+        """
+        total_delay = 0
+        for attempt in range(self.max_retries + 1):
+            try:
+                return func(*args, **kwargs)
+            except DatabaseError as e:
+                if "database is locked" in str(e).lower() and attempt < self.max_retries:
+                    # 指数退避 + 随机抖动，避免惊群效应
+                    delay = self.base_delay * (2 ** attempt) + random.uniform(0, 0.05)
+
+                    # 检查总延迟时间是否超过限制
+                    if total_delay + delay > self.max_total_delay:
+                        logger.error(f"❌ 数据库锁定重试超时，总延迟 {total_delay:.2f}s 超过限制 {self.max_total_delay}s")
+                        raise
+
+                    total_delay += delay
+                    logger.warning(f"🔄 数据库锁定，第 {attempt + 1} 次重试，等待 {delay:.2f}s (累计 {total_delay:.2f}s): {str(e)}")
+                    time.sleep(delay)
+                    continue
+                else:
+                    # 重试次数用完或不是锁定错误，直接抛出
+                    logger.error(f"❌ 数据库操作失败，已达最大重试次数: {str(e)}")
+                    raise
+            except Exception as e:
+                # 非数据库错误，直接抛出
+                raise
+
+    @throttle_db_write
+    def create_analysis_safely(self, media, model, analysis_options, prompt=None):
+        """原子性创建分析任务（带重试机制和限流，优化锁竞争）"""
+        from ollama.models import OllamaImageAnalysis
+
+        def _do_create():
+            with transaction.atomic():
+                # 优化：先检查是否存在进行中的任务，避免不必要的锁
+                # 使用更宽松的查询条件，减少锁竞争
+                existing_analysis = OllamaImageAnalysis.objects.filter(
+                    media=media,
+                    model=model,
+                    analysis_options=analysis_options,
+                    status__in=['pending', 'processing']  # 只检查进行中的任务
+                ).first()
+
+                if existing_analysis:
+                    logger.info(f"发现已有进行中的分析任务: {existing_analysis.id}")
+                    return existing_analysis, False  # 返回现有任务， False表示未创建新任务
+
+                # 原子性创建新任务
+                analysis = OllamaImageAnalysis.objects.create(
+                    media=media,
+                    model=model,
+                    analysis_options=analysis_options,
+                    prompt=prompt,
+                    status='pending'  # 确保初始状态正确
+                )
+
+                logger.info(f"✅ 原子性创建分析任务: {analysis.id}")
+                return analysis, True  # 返回新创建的任务， True表示创建了新任务
+
+        try:
+            return self._retry_with_backoff(_do_create)
+        except Exception as e:
+            logger.error(f"❌ 创建分析任务失败: {str(e)}")
+            raise
+
+    @throttle_db_write
+    def update_analysis_status(self, analysis_id: int, from_status: Optional[str], to_status: str, **kwargs) -> bool:
+        """原子性更新分析状态（带重试机制和限流）"""
+        from ollama.models import OllamaImageAnalysis
+
+        def _do_update():
+            with transaction.atomic():
+                # 使用 select_for_update 锁定记录避免死锁
+                analysis = OllamaImageAnalysis.objects.select_for_update(skip_locked=False).get(id=analysis_id)
+
+                # 增强状态检查逻辑
+                current_status = analysis.status
+                
+                # 如果指定了源状态，检查当前状态是否匹配
+                if from_status:
+                    if isinstance(from_status, str):
+                        if current_status != from_status:
+                            logger.warning(f"状态不匹配: analysis_id={analysis_id}, "
+                                         f"current={current_status}, expected={from_status}")
+                            return False
+                    elif isinstance(from_status, list):
+                        if current_status not in from_status:
+                            logger.warning(f"状态不在预期范围内: analysis_id={analysis_id}, "
+                                         f"current={current_status}, expected={from_status}")
+                            return False
+
+                # 更严格的状态转换验证
+                if not self._is_valid_status_transition(current_status, to_status):
+                    # 特殊处理：如果目标状态是cancelled或failed，允许从任何状态转换
+                    if to_status not in ['cancelled', 'failed']:
+                        logger.error(f"无效的状态转换: analysis_id={analysis_id}, "
+                                   f"{current_status} -> {to_status}")
+                        return False
+                    else:
+                        logger.warning(f"强制状态转换（取消/失败）: analysis_id={analysis_id}, "
+                                     f"{current_status} -> {to_status}")
+
+                # 更新状态和附加字段
+                old_status = analysis.status
+                analysis.status = to_status
+
+                # 更新时间戳
+                current_time = timezone.now()
+                if to_status == 'processing' and not analysis.started_at:
+                    analysis.started_at = current_time
+                elif to_status in ['completed', 'failed', 'cancelled'] and not analysis.completed_at:
+                    analysis.completed_at = current_time
+
+                # 更新其他字段
+                for key, value in kwargs.items():
+                    if hasattr(analysis, key):
+                        setattr(analysis, key, value)
+
+                # 计算处理时间
+                if to_status == 'completed':
+                    processing_time_ms = kwargs.get('processing_time')
+                    if processing_time_ms is not None:
+                        analysis.processing_time = processing_time_ms
+                        logger.debug(f"使用传入的处理时间: {processing_time_ms}ms, analysis_id={analysis_id}")
+                    elif analysis.started_at:
+                        calculated_time = int((current_time - analysis.started_at).total_seconds() * 1000)
+                        analysis.processing_time = calculated_time
+                        logger.debug(f"计算的处理时间: {calculated_time}ms, analysis_id={analysis_id}")
+                    else:
+                        analysis.processing_time = 0
+                        logger.warning(f"无法计算处理时间，started_at为空，设置为0, analysis_id={analysis_id}")
+
+                # 确保处理时间不为None
+                if to_status == 'completed' and not analysis.processing_time:
+                    analysis.processing_time = int((current_time - analysis.started_at).total_seconds() * 1000) if analysis.started_at else 0
+                    logger.warning(f"处理时间为空，重新计算: {analysis.processing_time}ms, analysis_id={analysis_id}")
+
+                analysis.save()
+
+                # 清除相关缓存
+                self._clear_analysis_cache(analysis_id)
+
+                logger.info(f"✅ 状态更新成功: analysis_id={analysis_id}, "
+                           f"{old_status} -> {to_status}")
+                return True
+
+        try:
+            return self._retry_with_backoff(_do_update)
+        except Exception as e:
+            logger.error(f"❌ 状态更新失败: analysis_id={analysis_id}, error={str(e)}")
+            return False
+
+    @throttle_db_write
+    def batch_update_status(self, analysis_ids: List[int], from_status: Optional[str], to_status: str, **kwargs) -> Dict[str, int]:
+        """批量原子性更新状态（带重试机制和限流）"""
+        from ollama.models import OllamaImageAnalysis
+
+        def _do_batch_update():
+            with transaction.atomic():
+                # 优化：先获取当前状态，用于日志记录
+                current_statuses = dict(
+                    OllamaImageAnalysis.objects.filter(id__in=analysis_ids)
+                    .values_list('id', 'status')
+                )
+                
+                # 构建查询条件
+                queryset = OllamaImageAnalysis.objects.filter(id__in=analysis_ids)
+
+                if from_status:
+                    if isinstance(from_status, str):
+                        queryset = queryset.filter(status=from_status)
+                    elif isinstance(from_status, list):
+                        queryset = queryset.filter(status__in=from_status)
+
+                # 更灵活的状态转换逻辑
+                if to_status == 'cancelled':
+                    # 允许从 pending 或 processing 状态取消
+                    if not from_status:  # 如果没有指定源状态，则过滤
+                        queryset = queryset.filter(status__in=['pending', 'processing'])
+                elif to_status == 'processing':
+                    # 只能从 pending 状态开始处理
+                    if not from_status:  # 如果没有指定源状态，则过滤
+                        queryset = queryset.filter(status='pending')
+                elif to_status == 'failed':
+                    # 可以从任何状态标记为失败，不额外过滤
+                    pass
+                elif to_status == 'completed':
+                    # 只能从 processing 状态完成
+                    if not from_status:  # 如果没有指定源状态，则过滤
+                        queryset = queryset.filter(status='processing')
+
+                # 准备更新数据
+                update_data = {'status': to_status}
+                current_time = timezone.now()
+
+                if to_status == 'processing':
+                    update_data['started_at'] = current_time
+                elif to_status in ['completed', 'failed', 'cancelled']:
+                    update_data['completed_at'] = current_time
+
+                # 添加其他更新字段
+                update_data.update(kwargs)
+
+                # 执行批量更新
+                updated_count = queryset.update(**update_data)
+
+                # 优化：记录详细的状态转换信息
+                if updated_count < len(analysis_ids):
+                    # 找出未更新的记录 - 修复：应该检查哪些记录实际被更新了
+                    actually_updated_ids = set(
+                        OllamaImageAnalysis.objects.filter(id__in=analysis_ids, status=to_status)
+                        .values_list('id', flat=True)
+                    )
+                    not_updated_ids = set(analysis_ids) - actually_updated_ids
+                    
+                    for analysis_id in not_updated_ids:
+                        current_status = current_statuses.get(analysis_id, 'unknown')
+                        logger.warning(f"批量更新跳过: analysis_id={analysis_id}, "
+                                     f"current_status={current_status}, target_status={to_status}")
+
+                # 清除缓存
+                for analysis_id in analysis_ids:
+                    self._clear_analysis_cache(analysis_id)
+
+                logger.info(f"✅ 批量状态更新完成: 成功 {updated_count}/{len(analysis_ids)} 个, "
+                           f"状态: {from_status or '*'} -> {to_status}")
+
+                return {
+                    'success_count': updated_count,
+                    'error_count': len(analysis_ids) - updated_count
+                }
+
+        try:
+            return self._retry_with_backoff(_do_batch_update)
+        except Exception as e:
+            logger.error(f"❌ 批量状态更新失败: error={str(e)}")
+            return {'success_count': 0, 'error_count': len(analysis_ids)}
+
+    def _is_valid_status_transition(self, from_status: str, to_status: str) -> bool:
+        """验证状态转换是否有效"""
+        valid_transitions = {
+            'pending': ['processing', 'cancelled', 'failed'],
+            'processing': ['completed', 'failed', 'cancelled'],
+            'completed': [],  # 已完成不能转换
+            'failed': ['pending'],  # 失败可以重试
+            'cancelled': []  # 已取消不能转换
+        }
+
+        # 优化：允许特殊情况下的状态转换
+        # 如果目标状态是cancelled或failed，允许从任何状态转换（用于强制取消或标记失败）
+        if to_status in ['cancelled', 'failed']:
+            return True
+            
+        return to_status in valid_transitions.get(from_status, [])
+
+    def _clear_analysis_cache(self, analysis_id: int):
+        """清除分析任务相关缓存"""
+        cache_keys = [
+            f'analysis_status_{analysis_id}',
+            f'analysis_details_{analysis_id}',
+            f'user_task_counts_*',  # 用户任务统计缓存
+        ]
+
+        for key in cache_keys:
+            if key.endswith('*'):
+                # 模糊匹配删除 - Django缓存可能不支持keys方法，使用简单的删除
+                try:
+                    cache.delete(key.replace('*', ''))
+                except:
+                    pass  # 忽略删除失败
+            else:
+                cache.delete(key)
+
+    @transaction.atomic
+    def increment_retry_count(self, analysis_id: int) -> bool:
+        """原子性增加重试次数"""
+        from ollama.models import OllamaImageAnalysis
+
+        try:
+            with transaction.atomic():
+                analysis = OllamaImageAnalysis.objects.select_for_update().get(id=analysis_id)
+
+                if analysis.retry_count >= 3:  # 最大重试次数限制
+                    logger.warning(f"分析任务已达最大重试次数: analysis_id={analysis_id}")
+                    return False
+
+                analysis.retry_count = F('retry_count') + 1
+                analysis.save()
+
+                # 重新获取对象以获取更新后的值
+                analysis.refresh_from_db()
+                logger.info(f"🔄 重试次数更新: analysis_id={analysis_id}, retry_count={analysis.retry_count}")
+                return True
+
+        except Exception as e:
+            logger.error(f"❌ 更新重试次数失败: analysis_id={analysis_id}, error={str(e)}")
+            return False
+
+    @throttle_db_write
+    def update_media_with_analysis_result(self, analysis, result: Dict[str, Any]) -> bool:
+        """原子性更新媒体分析结果（使用重试机制和限流）"""
+        from media.models import Media, Category, Tag
+
+        def _do_update():
+            with transaction.atomic():
+                # 锁定媒体记录
+                media = Media.objects.select_for_update().get(id=analysis.media.id)
+
+                # 更新媒体字段
+                if result.get('title'):
+                    media.title = result['title'][:200]  # 限制长度
+
+                # 合并描述和提示词为AI描述
+                ai_description_parts = []
+                if result.get('description'):
+                    ai_description_parts.append(result['description'][:1000])
+                if result.get('prompt'):
+                    ai_description_parts.append(f"提示词: {result['prompt'][:500]}")
+
+                if ai_description_parts:
+                    media.description = '\n\n'.join(ai_description_parts)
+
+                # 处理分类
+                if result.get('categories'):
+                    category_objects = []
+
+                    # 确保 categories 是列表格式
+                    categories_list = result['categories']
+                    if not isinstance(categories_list, list):
+                        # 如果不是列表，尝试转换
+                        if isinstance(categories_list, str):
+                            categories_list = [categories_list]
+                        else:
+                            categories_list = [str(categories_list)]
+
+                    # 获取或创建分类对象
+                    for cat_name in categories_list[:10]:  # 限制数量
+                        # 确保分类名是字符串，处理可能的嵌套
+                        if isinstance(cat_name, list):
+                            # 如果是嵌套列表，展平它
+                            cat_name = str(cat_name[0]) if cat_name else ''
+                        elif not isinstance(cat_name, str):
+                            cat_name = str(cat_name)
+
+                        # 跳过空分类
+                        if not cat_name.strip():
+                            continue
+
+                        category, created = Category.objects.get_or_create(
+                            name=cat_name[:100],  # 限制长度
+                            user=media.user,
+                            defaults={'description': f'自动生成的分类: {cat_name}'}
+                        )
+                        category_objects.append(category)
+                    
+                    # 设置分类关系
+                    media.categories.set(category_objects)
+
+                # 处理标签
+                if result.get('tags'):
+                    logger.debug(f"Tags received: {type(result['tags'])} - {result['tags']}")
+                    tag_objects = []
+
+                    # 确保 tags 是列表格式
+                    tags_list = result['tags']
+                    if not isinstance(tags_list, list):
+                        # 如果不是列表，尝试转换
+                        if isinstance(tags_list, str):
+                            tags_list = [tags_list]
+                        else:
+                            tags_list = [str(tags_list)]
+
+                    # 处理每个标签
+                    for tag_name in tags_list[:20]:  # 限制数量
+                        # 确保标签名是字符串，处理可能的嵌套
+                        if isinstance(tag_name, list):
+                            # 如果是嵌套列表，展平它
+                            tag_name = str(tag_name[0]) if tag_name else ''
+                        elif not isinstance(tag_name, str):
+                            tag_name = str(tag_name)
+
+                        # 跳过空标签
+                        if not tag_name.strip():
+                            continue
+
+                        tag, created = Tag.objects.get_or_create(
+                            name=tag_name[:50],  # 限制长度
+                            user=media.user,
+                            defaults={}
+                        )
+                        tag_objects.append(tag)
+
+                    # 只有在有标签对象时才设置
+                    if tag_objects:
+                        media.tags.set(tag_objects)
+
+                # 更新时间戳
+                media.save()
+
+                logger.info(f"✅ 媒体分析结果更新成功: media_id={media.id}")
+                return True
+
+        try:
+            return self._retry_with_backoff(_do_update)
+        except Exception as e:
+            logger.error(f"❌ 更新媒体分析结果失败: media_id={analysis.media.id}, error={str(e)}")
+            return False
+
+    def get_user_task_statistics(self, user_id: int) -> Dict[str, Any]:
+        """获取用户任务统计（实时数据）"""
+        try:
+            from ollama.models import OllamaImageAnalysis
+
+            # 使用聚合查询获取统计信息
+            stats = OllamaImageAnalysis.objects.filter(
+                media__user_id=user_id
+            ).values('status').annotate(
+                count=models.Count('id')
+            )
+
+            # 构建统计字典
+            result = {
+                'pending': 0,
+                'processing': 0,
+                'completed': 0,
+                'failed': 0,
+                'cancelled': 0,
+                'total': 0
+            }
+
+            for stat in stats:
+                status = stat['status']
+                count = stat['count']
+                if status in result:
+                    result[status] = count
+                result['total'] += count
+
+            # 添加其他统计信息
+            result['processing_time_avg'] = self._get_avg_processing_time(user_id)
+            result['last_activity'] = self._get_last_activity_time(user_id)
+
+            return result
+
+        except Exception as e:
+            logger.error(f"❌ 获取用户统计失败: user_id={user_id}, error={str(e)}")
+            return {}
+
+    def _get_avg_processing_time(self, user_id: int) -> float:
+        """获取平均处理时间"""
+        try:
+            from ollama.models import OllamaImageAnalysis
+
+            avg_time = OllamaImageAnalysis.objects.filter(
+                media__user_id=user_id,
+                status='completed',
+                processing_time__isnull=False
+            ).aggregate(
+                avg_time=models.Avg('processing_time')
+            )['avg_time']
+
+            return round(avg_time or 0, 2)
+        except:
+            return 0.0
+
+    def _get_last_activity_time(self, user_id: int) -> Optional[timezone.datetime]:
+        """获取最后活动时间"""
+        try:
+            from ollama.models import OllamaImageAnalysis
+
+            last_analysis = OllamaImageAnalysis.objects.filter(
+                media__user_id=user_id
+            ).order_by('-created_at').first()
+
+            return last_analysis.created_at if last_analysis else None
+        except:
+            return None
+
+    @transaction.atomic
+    def cleanup_old_analyses(self, days_old: int = 30) -> Dict[str, int]:
+        """清理旧的分析记录"""
+        from ollama.models import OllamaImageAnalysis
+
+        try:
+            cutoff_date = timezone.now() - timezone.timedelta(days=days_old)
+
+            with transaction.atomic():
+                # 获取要删除的记录数量
+                old_count = OllamaImageAnalysis.objects.filter(
+                    created_at__lt=cutoff_date,
+                    status__in=['completed', 'failed', 'cancelled']
+                ).count()
+
+                if old_count == 0:
+                    logger.info(f"没有需要清理的旧分析记录（{days_old}天前）")
+                    return {'deleted_count': 0}
+
+                # 删除旧记录
+                deleted_count, _ = OllamaImageAnalysis.objects.filter(
+                    created_at__lt=cutoff_date,
+                    status__in=['completed', 'failed', 'cancelled']
+                ).delete()
+
+                logger.info(f"✅ 清理完成: 删除了 {deleted_count} 个旧分析记录")
+                return {'deleted_count': deleted_count}
+
+        except Exception as e:
+            logger.error(f"❌ 清理旧分析记录失败: error={str(e)}")
+            return {'deleted_count': 0, 'error': str(e)}
+
+
+# 全局状态管理器实例
+state_manager = StateManager()
+
+
+=== /root/dev/epipremnum/backend/workflow/task_service.py ===
+"""
+Ollama图片分析任务服务
+负责任务的创建、查询、重试等管理操作
+"""
+
+import logging
+from typing import Dict, Optional
+from django.contrib.auth import get_user_model
+from django_async_manager.models import Task
+
+from ollama.models import OllamaImageAnalysis, OllamaAIModel
+from .task_workers import analyze_image_task, cancel_analysis_task
+from .state_manager import state_manager
+
+logger = logging.getLogger(__name__)
+User = get_user_model()
+
+
+class TaskService:
+    """Ollama图片分析任务服务"""
+
+    def create_task(self, user, media_id: int, model_name: Optional[str] = None,
+                   analysis_options: Optional[Dict] = None, prompt: Optional[str] = None) -> Dict:
+        """创建分析任务"""
+        try:
+            from media.models import Media
+
+            # 验证媒体文件
+            media = Media.objects.get(id=media_id)
+            if media.user != user:
+                return {'success': False, 'error': '没有权限访问此媒体文件'}
+
+            # 获取模型
+            model = self._get_model(user, model_name)
+            if not model:
+                return {'success': False, 'error': '没有可用的分析模型'}
+
+            # 使用状态管理器创建分析记录
+            analysis, created = state_manager.create_analysis_safely(
+                media=media,
+                model=model,
+                analysis_options=analysis_options or {},
+                prompt=prompt
+            )
+
+            # 如果返回了已存在的任务，返回其信息
+            if not created:
+                return {
+                    'success': False,
+                    'error': f'该媒体文件已有相同的分析任务正在进行中（分析ID: {analysis.id}，任务ID: {analysis.task_id or "未分配"}）',
+                    'data': {
+                        'analysis_id': analysis.id,
+                        'task_id': analysis.task_id or "未分配",
+                        'media_id': media_id,
+                        'model_name': analysis.model.name if analysis.model else None,
+                        'status': analysis.status,
+                        'is_duplicate': True
+                    }
+                }
+
+            # 启动异步任务
+            task = analyze_image_task.run_async(analysis_id=analysis.id)
+            analysis.task_id = task.id
+            analysis.save(update_fields=['task_id'])
+
+            logger.info(f"✅ 分析任务创建: analysis_id={analysis.id}, task_id={task.id}")
+
+            return {
+                'success': True,
+                'analysis_id': analysis.id,
+                'task_id': str(task.id),
+                'media_id': media_id,
+                'model_name': model.name,
+                'status': 'pending'
+            }
+
+        except Media.DoesNotExist:
+            return {'success': False, 'error': '媒体文件不存在'}
+        except Exception as e:
+            logger.error(f"❌ 创建任务失败: {str(e)}")
+            return {'success': False, 'error': f'创建任务失败: {str(e)}'}
+
+    def get_task_status(self, analysis_id: int, user) -> Dict:
+        """获取任务状态"""
+        try:
+            analysis = OllamaImageAnalysis.objects.select_related('media', 'model').get(
+                id=analysis_id, media__user=user
+            )
+
+            return {
+                'success': True,
+                'analysis_id': analysis.id,
+                'media_id': analysis.media.id,
+                'status': analysis.status,
+                'progress': analysis.task_progress,
+                'created_at': analysis.created_at.isoformat(),
+                'started_at': analysis.started_at.isoformat() if analysis.started_at else None,
+                'completed_at': analysis.completed_at.isoformat() if analysis.completed_at else None,
+                'processing_time_s': round(analysis.processing_time / 1000, 2) if analysis.processing_time else None,
+                'retry_count': analysis.retry_count,
+                'model_name': analysis.model.name if analysis.model else None,
+                'can_retry': analysis.can_retry(),
+                'error_message': analysis.error_message
+            }
+
+        except OllamaImageAnalysis.DoesNotExist:
+            return {'success': False, 'error': '分析任务不存在'}
+        except Exception as e:
+            logger.error(f"❌ 获取任务状态失败: {str(e)}")
+            return {'success': False, 'error': f'获取状态失败: {str(e)}'}
+
+    def retry_task(self, analysis_id: int, user) -> Dict:
+        """重试任务"""
+        try:
+            analysis = OllamaImageAnalysis.objects.select_related('media').get(
+                id=analysis_id, media__user=user
+            )
+
+            if not analysis.can_retry():
+                return {
+                    'success': False,
+                    'error': f'任务无法重试: status={analysis.status}, retries={analysis.retry_count}'
+                }
+
+            # 增加重试次数
+            analysis.increment_retry()
+            
+            # 重新启动分析任务
+            task = analyze_image_task.run_async(analysis_id=analysis_id)
+            analysis.task_id = task.id
+            analysis.save(update_fields=['task_id'])
+            
+            logger.info(f"🔄 重试任务启动: analysis_id={analysis_id}, task_id={task.id}")
+
+            return {
+                'success': True,
+                'analysis_id': analysis_id,
+                'task_id': str(task.id),
+                'retry_count': analysis.retry_count
+            }
+
+        except OllamaImageAnalysis.DoesNotExist:
+            return {'success': False, 'error': '分析任务不存在'}
+        except Exception as e:
+            logger.error(f"❌ 重试任务失败: {str(e)}")
+            return {'success': False, 'error': f'重试失败: {str(e)}'}
+
+    def cancel_task(self, analysis_id: int, user) -> Dict:
+        """取消任务"""
+        try:
+            analysis = OllamaImageAnalysis.objects.select_related('media').get(
+                id=analysis_id, media__user=user
+            )
+
+            if analysis.status not in ['pending', 'processing']:
+                return {'success': False, 'error': f'任务无法取消: status={analysis.status}'}
+
+            task = cancel_analysis_task.run_async(analysis_id=analysis_id)
+            logger.info(f"🚫 取消任务启动: analysis_id={analysis_id}, task_id={task.id}")
+
+            return {
+                'success': True,
+                'analysis_id': analysis_id,
+                'task_id': str(task.id)
+            }
+
+        except OllamaImageAnalysis.DoesNotExist:
+            return {'success': False, 'error': '分析任务不存在'}
+        except Exception as e:
+            logger.error(f"❌ 取消任务失败: {str(e)}")
+            return {'success': False, 'error': f'取消失败: {str(e)}'}
+
+    def list_tasks(self, user, status_filter: Optional[str] = None,
+                   limit: int = 50, offset: int = 0) -> Dict:
+        """获取任务列表"""
+        try:
+            queryset = OllamaImageAnalysis.objects.filter(
+                media__user=user
+            ).select_related('media', 'model').order_by('-created_at')
+
+            if status_filter:
+                queryset = queryset.filter(status=status_filter)
+
+            total_count = queryset.count()
+            tasks = queryset[offset:offset + limit]
+
+            task_list = []
+            for task in tasks:
+                task_list.append({
+                    'analysis_id': task.id,
+                    'media_id': task.media.id,
+                    'media_title': task.media.title or task.media.file.name,
+                    'status': task.status,
+                    'progress': task.task_progress,
+                    'model_name': task.model.name if task.model else None,
+                    'created_at': task.created_at.isoformat(),
+                    'processing_time_s': round(task.processing_time / 1000, 2) if task.processing_time else None,
+                    'retry_count': task.retry_count,
+                    'can_retry': task.can_retry(),
+                    'error_message': task.error_message
+                })
+
+            return {
+                'success': True,
+                'tasks': task_list,
+                'total_count': total_count,
+                'limit': limit,
+                'offset': offset
+            }
+
+        except Exception as e:
+            logger.error(f"❌ 获取任务列表失败: {str(e)}")
+            return {'success': False, 'error': f'获取列表失败: {str(e)}'}
+
+    def _get_model(self, user, model_name: Optional[str]) -> Optional[OllamaAIModel]:
+        """获取分析模型"""
+        queryset = OllamaAIModel.objects.filter(
+            endpoint__created_by=user,
+            is_active=True,
+            is_vision_capable=True
+        )
+
+        if model_name:
+            queryset = queryset.filter(name=model_name)
+
+        return queryset.filter(is_default=True).first() or queryset.first()
+
+    
+    def get_user_statistics(self, user) -> Dict:
+        """获取用户任务统计"""
+        try:
+            # 使用状态管理器获取统计信息
+            user_stats = state_manager.get_user_task_statistics(user.id)
+            
+            return {
+                'success': True,
+                'statistics': user_stats
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ 获取用户统计失败: {str(e)}")
+            return {'success': False, 'error': f'获取统计失败: {str(e)}'}
+
+    def cleanup_old_tasks(self, user, days_old: int = 30) -> Dict:
+        """清理用户的旧任务"""
+        try:
+            # 使用状态管理器清理旧分析记录
+            cleanup_result = state_manager.cleanup_old_analyses(days_old)
+            
+            return {
+                'success': True,
+                'deleted_count': cleanup_result.get('deleted_count', 0),
+                'message': f"已清理 {cleanup_result.get('deleted_count', 0)} 个旧任务"
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ 清理旧任务失败: {str(e)}")
+            return {'success': False, 'error': f'清理失败: {str(e)}'}
+
+    def batch_analyze(self, user, media_ids: list, model_name: Optional[str] = None,
+                     analysis_options: Optional[Dict] = None) -> Dict:
+        """批量分析任务"""
+        try:
+            from .batch_handler import batch_handler
+            
+            # 使用批量处理器执行批量分析
+            result = batch_handler.analyze_images_with_concurrency_task(
+                user_id=user.id,
+                media_ids=media_ids,
+                model_name=model_name,
+                analysis_options=analysis_options or {}
+            )
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"❌ 批量分析失败: {str(e)}")
+            return {'success': False, 'error': f'批量分析失败: {str(e)}'}
+
+    def cancel_all_user_tasks(self, user) -> Dict:
+        """取消用户所有任务"""
+        try:
+            from .task_workers import cancel_all_user_tasks_task
+            
+            # 启动取消所有用户任务的异步任务
+            task = cancel_all_user_tasks_task.run_async(user_id=user.id)
+            
+            logger.info(f"🚫 取消用户所有任务启动: user_id={user.id}, task_id={task.id}")
+            
+            return {
+                'success': True,
+                'task_id': str(task.id),
+                'message': '已启动取消所有任务的异步操作'
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ 取消所有任务失败: {str(e)}")
+            return {'success': False, 'error': f'取消所有任务失败: {str(e)}'}
+
+    def get_batch_status(self, user) -> Dict:
+        """获取批量处理状态"""
+        try:
+            from .batch_handler import batch_handler
+            
+            # 使用批量处理器获取状态摘要
+            status_summary = batch_handler.get_status_summary(user)
+            
+            return {
+                'success': True,
+                'status': status_summary
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ 获取批量状态失败: {str(e)}")
+            return {'success': False, 'error': f'获取批量状态失败: {str(e)}'}
+
+
+# 全局任务服务实例
+task_service = TaskService()
+
+
+=== /root/dev/epipremnum/backend/workflow/task_workers.py ===
+"""
+Ollama图片分析异步任务工作者 - 简化版
+专注于批量分析的高效执行
+"""
+
+import logging
+
+logger = logging.getLogger(__name__)
+
+# 延迟初始化 background_task
+_background_task = None
+
+def get_background_task_decorator():
+    """获取 background_task 装饰器（延迟加载）"""
+    global _background_task
+    if _background_task is None:
+        from django_async_manager import get_background_task
+        _background_task = get_background_task()
+    return _background_task
+
+
+def _analyze_batch_task(user_id, analysis_ids, model_name, max_concurrent=5):
+    """
+    批量分析图片任务 - 简化版
+    直接使用并发管理器处理
+    """
+    logger.info(f"开始批量分析: {len(analysis_ids)} 个任务，并发数: {max_concurrent}")
+
+    try:
+        from ollama.models import OllamaImageAnalysis
+        from .concurrency_manager import concurrency_manager
+        from .state_manager import state_manager
+
+        # 获取分析任务
+        analyses = OllamaImageAnalysis.objects.filter(
+            id__in=analysis_ids
+        ).select_related('media', 'model')
+
+        # 批量更新状态为处理中
+        state_manager.batch_update_status(
+            analysis_ids=analysis_ids,
+            from_status='pending',
+            to_status='processing'
+        )
+
+        # 准备媒体ID列表
+        media_ids = [analysis.media.id for analysis in analyses]
+
+        # 使用并发管理器处理
+        batch_result = concurrency_manager.process_batch_images(
+            user_id=user_id,
+            media_ids=media_ids,
+            model_name=model_name,
+            analysis_options={'max_concurrent': max_concurrent}
+        )
+
+        logger.info(f"批量分析完成: 成功 {batch_result['success_count']}, 失败 {batch_result['error_count']}")
+
+        return {
+            'success': True,
+            'completed_count': batch_result['success_count'],
+            'failed_count': batch_result['error_count'],
+            'total_count': len(analyses),
+            'model_name': model_name,
+            'max_concurrent': max_concurrent,
+            'details': batch_result
+        }
+
+    except Exception as e:
+        logger.error(f"批量分析任务失败: {str(e)}")
+
+        # 批量标记失败
+        try:
+            from .state_manager import state_manager
+            state_manager.batch_update_status(
+                analysis_ids=analysis_ids,
+                from_status=['pending', 'processing'],
+                to_status='failed',
+                error_message=f'批量任务失败: {str(e)}'
+            )
+        except Exception as update_error:
+            logger.error(f"批量更新失败状态时出错: {str(update_error)}")
+
+        raise
+
+
+def _analyze_image_task(analysis_id):
+    """
+    单个图片分析任务
+    """
+    logger.info(f"🚀 开始图片分析: analysis_id={analysis_id}")
+
+    try:
+        from ollama.models import OllamaImageAnalysis
+        from .ollama_client import OllamaImageAnalyzer
+
+        # 获取分析任务
+        analysis = OllamaImageAnalysis.objects.select_related('media', 'model').get(id=analysis_id)
+
+        # 检查任务状态
+        if analysis.status in ['failed', 'cancelled']:
+            logger.info(f"⏭️ 跳过已{analysis.status}的任务: analysis_id={analysis_id}")
+            return {'success': True, 'skipped': True, 'status': analysis.status}
+
+        # 使用状态管理器更新状态
+        from .state_manager import state_manager
+        success = state_manager.update_analysis_status(
+            analysis_id=analysis_id,
+            from_status='pending',
+            to_status='processing'
+        )
+
+        if not success:
+            logger.error(f"无法更新分析状态为处理中: analysis_id={analysis_id}")
+            return {'success': False, 'error': '状态更新失败'}
+
+        # 执行分析（使用并行版本）
+        analyzer = OllamaImageAnalyzer()
+        result = analyzer.analyze_parallel(analysis)
+
+        if result['success']:
+            # 更新媒体信息
+            state_manager.update_media_with_analysis_result(
+                analysis, result['result']
+            )
+
+            # 更新任务状态
+            state_manager.update_analysis_status(
+                analysis_id=analysis_id,
+                from_status='processing',
+                to_status='completed',
+                analysis_results=result['result'],
+                processing_time=result.get('processing_time_ms')
+            )
+
+            logger.info(f"✅ 分析完成: analysis_id={analysis_id}")
+            return {
+                'success': True,
+                'analysis_id': analysis_id,
+                'media_id': analysis.media.id,
+                'processing_time_s': round(result.get('processing_time_ms', 0) / 1000, 2)
+            }
+        else:
+            # 标记失败
+            state_manager.update_analysis_status(
+                analysis_id=analysis_id,
+                from_status='processing',
+                to_status='failed',
+                error_message=result['error']
+            )
+
+            logger.error(f"❌ 分析失败: analysis_id={analysis_id}, error={result['error']}")
+            return {'success': False, 'error': result['error']}
+
+    except OllamaImageAnalysis.DoesNotExist:
+        logger.error(f"❌ 分析任务不存在: analysis_id={analysis_id}")
+        return {'success': False, 'error': '分析任务不存在'}
+    except Exception as e:
+        logger.error(f"❌ 任务执行异常: analysis_id={analysis_id}, error={str(e)}")
+
+        # 标记失败
+        try:
+            from .state_manager import state_manager
+            state_manager.update_analysis_status(
+                analysis_id=analysis_id,
+                from_status=None,
+                to_status='failed',
+                error_message=f"任务执行异常: {str(e)}"
+            )
+        except Exception as update_error:
+            logger.error(f"更新失败状态时出错: {str(update_error)}")
+
+        return {'success': False, 'error': str(e)}
+
+
+def _cancel_analysis_task(analysis_id):
+    """
+    取消分析任务
+    """
+    logger.info(f"🚫 取消分析任务: analysis_id={analysis_id}")
+
+    try:
+        from ollama.models import OllamaImageAnalysis
+        from django_async_manager.models import Task
+        from django.utils import timezone
+
+        analysis = OllamaImageAnalysis.objects.get(id=analysis_id)
+
+        # 取消关联的异步任务
+        async_task_cancelled = False
+        if analysis.task_id:
+            try:
+                task = Task.objects.get(id=analysis.task_id)
+                if task.status in ['pending', 'running', 'retry']:
+                    task.status = 'cancelled'
+                    task.save()
+                    async_task_cancelled = True
+                    logger.info(f"✅ 异步任务已取消: task_id={analysis.task_id}")
+            except Task.DoesNotExist:
+                logger.warning(f"⚠️ 异步任务不存在: task_id={analysis.task_id}")
+
+        # 更新分析任务状态
+        db_updated = False
+        if analysis.status in ['pending', 'processing']:
+            analysis.status = 'cancelled'
+            analysis.completed_at = timezone.now()
+            analysis.save()
+            db_updated = True
+            logger.info(f"✅ 数据库状态已更新: analysis_id={analysis_id}")
+
+        return {
+            'success': async_task_cancelled or db_updated,
+            'analysis_id': analysis_id,
+            'async_task_cancelled': async_task_cancelled,
+            'database_updated': db_updated,
+            'final_status': analysis.status
+        }
+
+    except OllamaImageAnalysis.DoesNotExist:
+        logger.error(f"❌ 取消任务不存在: analysis_id={analysis_id}")
+        return {'success': False, 'error': '分析任务不存在'}
+    except Exception as e:
+        logger.error(f"❌ 取消任务失败: {str(e)}")
+        return {'success': False, 'error': f"取消失败: {str(e)}"}
+
+
+def _cancel_all_user_tasks_task(user_id):
+    """
+    取消用户所有进行中和待处理的任务
+    """
+    logger.info(f"🚫 开始取消用户所有任务: user_id={user_id}")
+
+    try:
+        from ollama.models import OllamaImageAnalysis
+        from django_async_manager.models import Task
+        from django.utils import timezone
+
+        # 取消数据库中的分析任务
+        cancelled_analyses = OllamaImageAnalysis.objects.filter(
+            media__user_id=user_id,
+            status__in=['pending', 'processing']
+        ).update(
+            status='cancelled',
+            completed_at=timezone.now(),
+            error_message='用户取消所有任务'
+        )
+
+        # 取消异步任务
+        cancelled_async_tasks = Task.objects.filter(
+            arguments__user_id=str(user_id),
+            status__in=['pending', 'running', 'retry']
+        ).update(
+            status='cancelled',
+            last_errors=['用户取消所有任务'],
+            completed_at=timezone.now()
+        )
+
+        logger.info(f"取消所有任务完成: 分析任务 {cancelled_analyses} 个, 异步任务 {cancelled_async_tasks} 个")
+
+        return {
+            'success': True,
+            'cancelled_analyses': cancelled_analyses,
+            'cancelled_async_tasks': cancelled_async_tasks,
+            'total_cancelled': cancelled_analyses + cancelled_async_tasks
+        }
+
+    except Exception as e:
+        logger.error(f"取消所有任务失败: {str(e)}")
+        return {'success': False, 'error': f"取消所有任务失败: {str(e)}"}
+
+
+# 应用装饰器 - 延迟加载模式
+analyze_batch_task = get_background_task_decorator()(max_retries=2, retry_delay=30)(_analyze_batch_task)
+analyze_image_task = get_background_task_decorator()(max_retries=3, retry_delay=60)(_analyze_image_task)
+cancel_analysis_task = get_background_task_decorator()(max_retries=1, retry_delay=15)(_cancel_analysis_task)
+cancel_all_user_tasks_task = get_background_task_decorator()(max_retries=1, retry_delay=15)(_cancel_all_user_tasks_task)
+
+
+=== /root/dev/epipremnum/backend/workflow/tests.py ===
+from django.test import TestCase
+
+# Create your tests here.
+
+
+
+=== /root/dev/epipremnum/backend/workflow/views.py ===
+from django.shortcuts import render
+
+# Create your views here.
+
+
+

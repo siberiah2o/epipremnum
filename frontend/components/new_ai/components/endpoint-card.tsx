@@ -1,7 +1,7 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Edit, Trash2 } from "lucide-react";
+import { Edit, Trash2, Cloud, Lock, LockOpen } from "lucide-react";
 import { OllamaEndpoint } from "../types/ai";
 
 interface EndpointCardProps {
@@ -28,6 +28,14 @@ export function EndpointCard({
           <div className="space-y-1 flex-1">
             <div className="flex items-center gap-1">
               <h3 className="font-semibold text-sm">{endpoint.name}</h3>
+              {/* 供应商类型标签 */}
+              <Badge
+                variant={endpoint.provider === 'ollama' ? 'outline' : 'default'}
+                className="text-xs"
+              >
+                <Cloud className="w-3 h-3 mr-1" />
+                {endpoint.provider_display || endpoint.provider}
+              </Badge>
               {endpoint.is_default && (
                 <Badge variant="default" className="text-xs">默认</Badge>
               )}
@@ -36,10 +44,19 @@ export function EndpointCard({
               ) : (
                 <Badge variant="outline" className="text-xs">非活跃</Badge>
               )}
-              {endpoint.is_default && (
-                <Badge variant="destructive" className="text-xs">
-                  不可删除
-                </Badge>
+              {/* API Key 状态 */}
+              {endpoint.provider !== 'ollama' && (
+                endpoint.has_api_key ? (
+                  <Badge variant="outline" className="text-xs text-green-600">
+                    <Lock className="w-3 h-3 mr-1" />
+                    已配置
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="text-xs text-orange-600">
+                    <LockOpen className="w-3 h-3 mr-1" />
+                    未配置
+                  </Badge>
+                )
               )}
             </div>
             <p className="text-xs text-muted-foreground font-mono truncate">
@@ -49,8 +66,8 @@ export function EndpointCard({
               <p className="text-xs line-clamp-1">{endpoint.description}</p>
             )}
             <div className="flex items-center gap-3 text-xs text-muted-foreground">
-              <span>超时: {endpoint.timeout || 300}s</span>
-              <span>创建者: {endpoint.created_by || "未知"}</span>
+              <span>创建者: {endpoint.created_by_username || "未知"}</span>
+              <span>认证: {endpoint.auth_type_display || endpoint.auth_type}</span>
             </div>
           </div>
           <div className="flex items-center gap-1">

@@ -89,7 +89,7 @@ class Command(BaseCommand):
 
             # 停止所有相关后台任务
             # 注意：现在使用新的批量处理器架构，通过用户ID来管理任务
-            from ollama.tasks.batch_handler import batch_handler
+            from workflow.batch_handler import batch_handler
 
             # 获取所有活跃用户的任务信息
             try:
@@ -192,7 +192,7 @@ class Command(BaseCommand):
     def _clean_concurrency_controller(self):
         """清理并发控制器状态"""
         try:
-            from ollama.tasks.concurrency_manager import concurrency_manager
+            from workflow.concurrency_manager import concurrency_manager
 
             # 清理所有状态
             if hasattr(concurrency_manager, 'active_threads'):

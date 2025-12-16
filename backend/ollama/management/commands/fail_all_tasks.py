@@ -105,7 +105,7 @@ class Command(BaseCommand):
 
             # 清理并发控制器中的活跃线程
             try:
-                from ollama.tasks.concurrency_manager import concurrency_manager
+                from workflow.concurrency_manager import concurrency_manager
                 active_info = concurrency_controller.get_active_tasks_info()
                 total_active_tasks = active_info.get('total_active_tasks', 0)
                 global_active_threads = active_info.get('global_active_threads', 0)
@@ -131,7 +131,7 @@ class Command(BaseCommand):
 
                 # 获取所有相关的后台任务
                 # 使用新的批量处理器架构来查找任务
-                from ollama.tasks.batch_handler import batch_handler
+                from workflow.batch_handler import batch_handler
 
                 try:
                     # 直接查找所有可能的分析任务

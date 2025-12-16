@@ -11,7 +11,22 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { OllamaEndpoint, CreateEndpointRequest } from "../types/ai";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Info, Lock, LockOpen } from "lucide-react";
+import {
+  OllamaEndpoint,
+  CreateEndpointRequest,
+  AIProvider,
+  AI_PROVIDERS
+} from "../types/ai";
 
 interface EndpointDialogProps {
   open: boolean;
@@ -29,6 +44,9 @@ export function EndpointDialog({
   const [form, setForm] = useState<CreateEndpointRequest>({
     name: "",
     url: "",
+    provider: "ollama",
+    api_key: "",
+    auth_type: "none",
     description: "",
     is_default: false,
     timeout: 300,
@@ -40,10 +58,25 @@ export function EndpointDialog({
     setForm({
       name: "",
       url: "",
+      provider: "ollama",
+      api_key: "",
+      auth_type: "none",
       description: "",
       is_default: false,
       timeout: 300,
     });
+  };
+
+  // 处理供应商变化
+  const handleProviderChange = (provider: AIProvider) => {
+    const providerConfig = AI_PROVIDERS[provider];
+    setForm(prev => ({
+      ...prev,
+      provider,
+      auth_type: providerConfig.defaultAuthType,
+      // 如果不需要API Key，清空它
+      api_key: providerConfig.requiresApiKey ? prev.api_key : "",
+    }));
   };
 
   // 当端点数据变化时，更新表单
@@ -52,9 +85,12 @@ export function EndpointDialog({
       setForm({
         name: endpoint.name || "",
         url: endpoint.url || "",
+        provider: endpoint.provider || "ollama",
+        api_key: "", // 不回填API Key，安全考虑
+        auth_type: endpoint.auth_type || "none",
         description: endpoint.description || "",
         is_default: endpoint.is_default ?? false,
-        timeout: endpoint.timeout ?? 300,
+        timeout: 300, // 默认值
       });
     } else {
       resetForm();
@@ -68,6 +104,14 @@ export function EndpointDialog({
       return;
     }
     if (!form.url.trim()) {
+      return;
+    }
+
+    // 根据供应商验证必填字段
+    // 编辑时，如果已经设置了API Key，就不要求重新输入
+    const providerConfig = AI_PROVIDERS[form.provider || "ollama"];
+    if (providerConfig.requiresApiKey && !endpoint && !form.api_key?.trim()) {
+      // 只有在创建新端点时才要求API Key
       return;
     }
 
@@ -96,9 +140,29 @@ export function EndpointDialog({
           <DialogTitle>
             {endpoint ? "编辑端点" : "创建新端点"}
           </DialogTitle>
-          <DialogDescription>配置 Ollama AI 服务的连接端点</DialogDescription>
+          <DialogDescription>配置 AI 服务的连接端点</DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="provider">供应商类型</Label>
+            <Select
+              value={form.provider || "ollama"}
+              onValueChange={(value: AIProvider) => handleProviderChange(value)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="选择供应商" />
+              </SelectTrigger>
+              <SelectContent>
+                {Object.entries(AI_PROVIDERS).map(([key, config]) => (
+                  <SelectItem key={key} value={key}>
+                    {config.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          
           <div className="space-y-2">
             <Label htmlFor="name">端点名称</Label>
             <Input
@@ -107,7 +171,7 @@ export function EndpointDialog({
               onChange={(e) =>
                 setForm((prev) => ({ ...prev, name: e.target.value }))
               }
-              placeholder="例如：本地Ollama、远程服务器"
+              placeholder="例如：本地Ollama、智谱AI"
               required
             />
           </div>
@@ -119,10 +183,53 @@ export function EndpointDialog({
               onChange={(e) =>
                 setForm((prev) => ({ ...prev, url: e.target.value }))
               }
-              placeholder="http://localhost:11434"
+              placeholder={
+                form.provider === "ollama"
+                  ? "http://localhost:11434"
+                  : "https://api.example.com/v1"
+              }
               required
             />
           </div>
+
+          {/* API Key 字段 - 只在需要时显示 */}
+          {form.provider && AI_PROVIDERS[form.provider].requiresApiKey && (
+            <div className="space-y-2">
+              <Label htmlFor="api_key">API Key</Label>
+              <Input
+                id="api_key"
+                type="password"
+                value={form.api_key || ""}
+                onChange={(e) =>
+                  setForm((prev) => ({ ...prev, api_key: e.target.value }))
+                }
+                placeholder="输入您的 API Key"
+                required
+              />
+              <p className="text-xs text-muted-foreground">
+                API Key 将被安全存储，不会在响应中返回
+              </p>
+            </div>
+          )}
+
+          {/* 认证类型选择 */}
+          {form.provider && form.provider !== "ollama" && (
+            <div className="space-y-2">
+              <Label htmlFor="auth_type">认证类型</Label>
+              <Select
+                value={form.auth_type || "api_key"}
+                onValueChange={(value) => setForm(prev => ({ ...prev, auth_type: value as any }))}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="api_key">API Key</SelectItem>
+                  <SelectItem value="bearer_token">Bearer Token</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           <div className="space-y-2">
             <Label htmlFor="description">描述</Label>
             <Textarea
@@ -180,7 +287,13 @@ export function EndpointDialog({
           <Button
             onClick={handleSubmit}
             type="button"
-            disabled={isSubmitting || !form.name.trim() || !form.url.trim()}
+            disabled={
+              isSubmitting ||
+              !form.name.trim() ||
+              !form.url.trim() ||
+              // 只有在创建新端点且供应商需要API Key时才检查
+              (!endpoint && AI_PROVIDERS[form.provider || "ollama"].requiresApiKey && !form.api_key?.trim())
+            }
           >
             {isSubmitting ? "提交中..." : (endpoint ? "更新" : "创建")}
           </Button>

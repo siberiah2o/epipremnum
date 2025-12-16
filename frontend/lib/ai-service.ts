@@ -344,7 +344,7 @@ export class AIManagementService {
 
   // 端点管理
   async getEndpoints(): Promise<OllamaEndpoint[]> {
-    return this.request<OllamaEndpoint[]>("/api/ollama/endpoints/");
+    return this.request<OllamaEndpoint[]>("/api/endpoint/endpoints/");
   }
 
   async createEndpoint(
@@ -353,14 +353,14 @@ export class AIManagementService {
     return this.request<{
       message: string;
       endpoint: OllamaEndpoint;
-    }>("/api/ollama/endpoints/", {
+    }>("/api/endpoint/endpoints/", {
       method: "POST",
       body: JSON.stringify(data),
     });
   }
 
   async getEndpoint(endpointId: number): Promise<OllamaEndpoint> {
-    return this.request<OllamaEndpoint>(`/api/ollama/endpoints/${endpointId}/`);
+    return this.request<OllamaEndpoint>(`/api/endpoint/endpoints/${endpointId}/`);
   }
 
   async updateEndpoint(
@@ -370,17 +370,17 @@ export class AIManagementService {
     return this.request<{
       message: string;
       endpoint: OllamaEndpoint;
-    }>(`/api/ollama/endpoints/${endpointId}/`, {
-      method: "PATCH",
+    }>(`/api/endpoint/endpoints/${endpointId}/`, {
+      method: "PUT",
       body: JSON.stringify(data),
     });
   }
 
   async deleteEndpoint(endpointId: number): Promise<{ message: string }> {
     return this.request<{ message: string }>(
-      `/api/ollama/endpoints/${endpointId}/delete/`,
+      `/api/endpoint/endpoints/${endpointId}/`,
       {
-        method: "POST",
+        method: "DELETE",
       }
     );
   }
@@ -390,7 +390,7 @@ export class AIManagementService {
       throw new Error("端点ID是必需的");
     }
     return this.request<EndpointTestResult>(
-      `/api/ollama/endpoints/${endpointId}/test_connection/`,
+      `/api/endpoint/endpoints/${endpointId}/test_connection/`,
       {
         method: "POST",
       }
@@ -456,11 +456,11 @@ export class AIManagementService {
     return this.request<{
       models: OllamaModel[];
       total: number;
-    }>("/api/ollama/models/");
+    }>("/api/endpoint/models/");
   }
 
   async refreshModels(endpointId?: number): Promise<ModelSyncResult> {
-    const response = await this.request<any>("/api/ollama/models/refresh_all/", {
+    const response = await this.request<any>("/api/endpoint/models/sync_from_endpoint/", {
       method: "POST",
       body: JSON.stringify({
         endpoint_id: endpointId,
@@ -478,21 +478,21 @@ export class AIManagementService {
   }
 
   async getModelDetails(modelId: number): Promise<OllamaModel> {
-    return this.request<OllamaModel>(`/api/ollama/models/${modelId}/`);
+    return this.request<OllamaModel>(`/api/endpoint/models/${modelId}/`);
   }
 
   async testModel(modelId: number): Promise<EndpointTestResult> {
-    return this.request<EndpointTestResult>(`/api/ollama/models/${modelId}/test/`);
+    return this.request<EndpointTestResult>(`/api/endpoint/models/${modelId}/test/`);
   }
 
   async setDefaultModelById(modelId: number): Promise<{ message: string }> {
-    return this.request<{ message: string }>(`/api/ollama/models/${modelId}/default/`, {
+    return this.request<{ message: string }>(`/api/endpoint/models/${modelId}/set_default/`, {
       method: "POST",
     });
   }
 
   async setDefaultModelByName(modelName: string): Promise<{ message: string }> {
-    return this.request<{ message: string }>("/api/ollama/models/set-default/", {
+    return this.request<{ message: string }>("/api/endpoint/models/set_default_by_name/", {
       method: "POST",
       body: JSON.stringify({
         model_name: modelName,
