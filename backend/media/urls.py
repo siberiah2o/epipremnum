@@ -1,16 +1,20 @@
+"""
+媒体模块 URL 路由配置
+
+API 端点:
+- /api/media/           - 媒体文件管理
+- /api/categories/      - 分类管理
+"""
+
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from . import views
 
-app_name = 'media'
+from .views import MediaViewSet, CategoryViewSet
 
-# 创建 ViewSet 路由器
 router = DefaultRouter()
-router.register(r'categories', views.CategoryViewSet, basename='categories')
-router.register(r'tags', views.TagViewSet, basename='tags')
-router.register(r'', views.MediaViewSet, basename='media')
+router.register(r'media', MediaViewSet, basename='media')
+router.register(r'categories', CategoryViewSet, basename='category')
 
 urlpatterns = [
-    # ViewSet 路由
     path('', include(router.urls)),
 ]

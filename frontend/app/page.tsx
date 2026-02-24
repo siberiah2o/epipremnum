@@ -1,64 +1,33 @@
-'use client'
-
-import { useAuth } from '@/contexts/auth-context'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import Link from 'next/link'
-import { useRouter } from 'next/navigation'
-import { useEffect } from 'react'
+import Link from 'next/link';
+import { Button } from '@/components/ui/button';
 
 export default function Home() {
-  const { isAuthenticated, isLoading } = useAuth()
-  const router = useRouter()
-
-  useEffect(() => {
-    if (isAuthenticated) {
-      router.replace('/dashboard')
-    }
-  }, [isAuthenticated, router])
-
-  if (isLoading) {
-    return (
-      <div className="container mx-auto flex min-h-screen items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-      </div>
-    )
-  }
-
-  // 如果已登录，不渲染任何内容（将重定向到dashboard）
-  if (isAuthenticated) {
-    return null
-  }
-
-  // 未登录用户看到欢迎页面
   return (
-    <div className="container mx-auto flex min-h-screen items-center justify-center px-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <CardTitle className="text-2xl font-bold">欢迎使用 Epipremnum</CardTitle>
-          <CardDescription>
-            用户管理系统 - 基于 Next.js 和 shadcn/ui 构建
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <Link href="/login">
-              <Button className="w-full" variant="default">
-                登录
-              </Button>
-            </Link>
-            <Link href="/register">
-              <Button className="w-full" variant="outline">
-                注册
-              </Button>
-            </Link>
-          </div>
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100">
+      <div className="w-full max-w-md space-y-8 rounded-2xl border bg-white p-8 shadow-lg">
+        <div className="text-center">
+          <h1 className="text-4xl font-bold tracking-tight text-gray-900">
+            Epipremnum
+          </h1>
+          <p className="mt-2 text-sm text-gray-600">
+            媒体管理与 AI 分析平台
+          </p>
+        </div>
 
-          <div className="text-center text-sm text-muted-foreground">
-            <p>请登录或注册以开始使用</p>
-          </div>
-        </CardContent>
-      </Card>
+        <div className="space-y-4">
+          <p className="text-center text-sm text-gray-600">
+            登录或注册以继续
+          </p>
+
+          <Button asChild className="w-full" size="lg">
+            <Link href="/login">登录</Link>
+          </Button>
+
+          <Button asChild variant="outline" className="w-full" size="lg">
+            <Link href="/register">注册</Link>
+          </Button>
+        </div>
+      </div>
     </div>
-  )
+  );
 }

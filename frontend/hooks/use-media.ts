@@ -1,658 +1,158 @@
-'use client'
+/**
+ * 媒体数据获取 Hook
+ */
+import { useState, useEffect, useCallback } from 'react';
+import { mediaApi } from '@/lib/api-client';
+import { extractPaginatedData, extractPaginationInfo } from '@/lib/types';
+import type { Media } from '@/lib/types';
 
-import { useState, useEffect } from 'react'
-import {
-  apiClient,
-  MediaCategory,
-  MediaTag,
-  MediaFile,
-  MediaListItem,
-  PaginatedMediaList,
-  PaginatedCategoryList,
-  PaginatedTagList,
-  CreateCategoryData,
-  UpdateCategoryData,
-  CreateTagData,
-  UpdateTagData,
-  UploadMediaData,
-  UpdateMediaData,
-  AddCategoriesData,
-  RemoveCategoriesData,
-  AddTagsData,
-  RemoveTagsData
-} from '@/lib/api'
-
-// ============ 分类管理 Hooks ============
-
-export function useCategories(
-  page: number = 1,
-  pageSize: number = 10,
-  search?: string
-) {
-  const [categoryList, setCategoryList] = useState<PaginatedCategoryList | null>(null)
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const fetchCategories = async (
-    pageNum: number = page,
-    pageSizeNum: number = pageSize,
-    searchQuery?: string
-  ) => {
-    setIsLoading(true)
-    setError(null)
-    try {
-      const response = await apiClient.getCategories(pageNum, pageSizeNum, searchQuery)
-      if (response.code === 200) {
-        setCategoryList(response.data)
-      } else {
-        setError(response.message)
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '获取分类列表失败')
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  const createCategory = async (data: CreateCategoryData) => {
-    setIsLoading(true)
-    setError(null)
-    try {
-      const response = await apiClient.createCategory(data)
-      if (response.code === 200 || response.code === 201) {
-        // 重新获取第一页数据以包含新创建的分类
-        await fetchCategories(1, pageSize, search)
-        return { success: true, data: response.data }
-      } else {
-        setError(response.message)
-        return { success: false, message: response.message }
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : '创建分类失败'
-      setError(message)
-      return { success: false, message }
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  const updateCategory = async (id: number, data: UpdateCategoryData) => {
-    setIsLoading(true)
-    setError(null)
-    try {
-      const response = await apiClient.updateCategory(id, data)
-      if (response.code === 200) {
-        // 重新获取当前页数据以反映更新
-        await fetchCategories(page, pageSize, search)
-        return { success: true, data: response.data }
-      } else {
-        setError(response.message)
-        return { success: false, message: response.message }
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : '更新分类失败'
-      setError(message)
-      return { success: false, message }
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  const deleteCategory = async (id: number) => {
-    setIsLoading(true)
-    setError(null)
-    try {
-      const response = await apiClient.deleteCategory(id)
-      if (response.code === 200) {
-        // 重新获取当前页数据以反映删除
-        await fetchCategories(page, pageSize, search)
-        return { success: true }
-      } else {
-        setError(response.message)
-        return { success: false, message: response.message }
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : '删除分类失败'
-      setError(message)
-      return { success: false, message }
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    fetchCategories(page, pageSize, search)
-  }, [page, pageSize, search])
-
-  return {
-    categoryList,
-    categories: categoryList?.results || [],
-    isLoading,
-    error,
-    refetch: fetchCategories,
-    createCategory,
-    updateCategory,
-    deleteCategory
-  }
+export interface UseMediaOptions {
+  /** 是否自动加载 */
+  autoLoad?: boolean;
+  /** 搜索关键词 */
+  search?: string;
+  /** 分类ID */
+  categoryId?: number;
+  /** 每页数量 */
+  pageSize?: number;
+  /** 页码 */
+  page?: number;
+  /** 排序字段 */
+  ordering?: string;
 }
 
-export function useCategory(id: number) {
-  const [category, setCategory] = useState<MediaCategory | null>(null)
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const fetchCategory = async () => {
-    if (!id) return
-
-    setIsLoading(true)
-    setError(null)
-    try {
-      const response = await apiClient.getCategory(id)
-      if (response.code === 200) {
-        setCategory(response.data)
-      } else {
-        setError(response.message)
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '获取分类详情失败')
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    fetchCategory()
-  }, [id])
-
-  return {
-    category,
-    isLoading,
-    error,
-    refetch: fetchCategory
-  }
+export interface UseMediaReturn {
+  /** 媒体列表 */
+  media: Media[];
+  /** 加载中 */
+  loading: boolean;
+  /** 错误信息 */
+  error: string | null;
+  /** 总数 */
+  total: number;
+  /** 刷新数据 */
+  refresh: () => Promise<void>;
+  /** 加载更多 */
+  loadMore: () => Promise<void>;
+  /** 是否还有更多数据 */
+  hasMore: boolean;
 }
 
-// ============ 标签管理 Hooks ============
+export function useMedia(options: UseMediaOptions = {}): UseMediaReturn {
+  const {
+    autoLoad = true,
+    search = '',
+    categoryId,
+    pageSize = 20,
+    page = 1,
+    ordering = '-created_at',
+  } = options;
 
-export function useTags(
-  page: number = 1,
-  pageSize: number = 10,
-  search?: string
-) {
-  const [tagList, setTagList] = useState<PaginatedTagList | null>(null)
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [media, setMedia] = useState<Media[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [total, setTotal] = useState(0);
+  const [currentPage, setCurrentPage] = useState(page);
 
-  const fetchTags = async (
-    pageNum: number = page,
-    pageSizeNum: number = pageSize,
-    searchQuery?: string
-  ) => {
-    setIsLoading(true)
-    setError(null)
+  const loadData = useCallback(async (pageNum: number = currentPage, append: boolean = false) => {
+    if (!append) {
+      setLoading(true);
+    }
+    setError(null);
+
     try {
-      const response = await apiClient.getTags(pageNum, pageSizeNum, searchQuery)
+      const response = await mediaApi.getImages({
+        search: search || undefined,
+        category: categoryId,
+        page: pageNum,
+        page_size: pageSize,
+        ordering,
+      });
+
       if (response.code === 200) {
-        setTagList(response.data)
+        const data = extractPaginatedData<Media>(response);
+        if (append) {
+          setMedia((prev) => [...prev, ...data]);
+        } else {
+          setMedia(data);
+        }
+        const pagination = extractPaginationInfo(response);
+        setTotal(pagination?.count || data.length);
+        setCurrentPage(pageNum);
       } else {
-        setError(response.message)
+        setError(response.message || '加载失败');
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : '获取标签列表失败')
+      setError(err instanceof Error ? err.message : '网络错误');
     } finally {
-      setIsLoading(false)
+      setLoading(false);
     }
-  }
+  }, [search, categoryId, pageSize, ordering, currentPage]);
 
-  const createTag = async (data: CreateTagData) => {
-    setIsLoading(true)
-    setError(null)
-    try {
-      const response = await apiClient.createTag(data)
-      if (response.code === 200 || response.code === 201) {
-        // 重新获取第一页数据以包含新创建的标签
-        await fetchTags(1, pageSize, search)
-        return { success: true, data: response.data }
-      } else {
-        setError(response.message)
-        return { success: false, message: response.message }
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : '创建标签失败'
-      setError(message)
-      return { success: false, message }
-    } finally {
-      setIsLoading(false)
-    }
-  }
+  const refresh = useCallback(async () => {
+    setCurrentPage(1);
+    await loadData(1, false);
+  }, [loadData]);
 
-  const updateTag = async (id: number, data: UpdateTagData) => {
-    setIsLoading(true)
-    setError(null)
-    try {
-      const response = await apiClient.updateTag(id, data)
-      if (response.code === 200) {
-        // 重新获取当前页数据以反映更新
-        await fetchTags(page, pageSize, search)
-        return { success: true, data: response.data }
-      } else {
-        setError(response.message)
-        return { success: false, message: response.message }
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : '更新标签失败'
-      setError(message)
-      return { success: false, message }
-    } finally {
-      setIsLoading(false)
-    }
-  }
+  const loadMore = useCallback(async () => {
+    const nextPage = currentPage + 1;
+    await loadData(nextPage, true);
+  }, [loadData, currentPage]);
 
-  const deleteTag = async (id: number) => {
-    setIsLoading(true)
-    setError(null)
-    try {
-      const response = await apiClient.deleteTag(id)
-      if (response.code === 200) {
-        // 重新获取当前页数据以反映删除
-        await fetchTags(page, pageSize, search)
-        return { success: true }
-      } else {
-        setError(response.message)
-        return { success: false, message: response.message }
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : '删除标签失败'
-      setError(message)
-      return { success: false, message }
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
+  // 初始加载
   useEffect(() => {
-    fetchTags(page, pageSize, search)
-  }, [page, pageSize, search])
-
-  return {
-    tagList,
-    tags: tagList?.results || [],
-    isLoading,
-    error,
-    refetch: fetchTags,
-    createTag,
-    updateTag,
-    deleteTag
-  }
-}
-
-export function useTag(id: number) {
-  const [tag, setTag] = useState<MediaTag | null>(null)
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const fetchTag = async () => {
-    if (!id) return
-
-    setIsLoading(true)
-    setError(null)
-    try {
-      const response = await apiClient.getTag(id)
-      if (response.code === 200) {
-        setTag(response.data)
-      } else {
-        setError(response.message)
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '获取标签详情失败')
-    } finally {
-      setIsLoading(false)
+    if (autoLoad) {
+      loadData(1, false);
     }
-  }
+  }, [autoLoad, search, categoryId, ordering]); // 注意：不包含 loadData
 
-  useEffect(() => {
-    fetchTag()
-  }, [id])
-
-  return {
-    tag,
-    isLoading,
-    error,
-    refetch: fetchTag
-  }
-}
-
-// ============ 媒体文件管理 Hooks ============
-
-export function useMediaList(
-  page: number = 1,
-  pageSize: number = 20,
-  search?: string,
-  categoryId?: number,
-  tagId?: number,
-  fileType?: string
-) {
-  const [mediaList, setMediaList] = useState<PaginatedMediaList | null>(null)
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const fetchMediaList = async (
-    pageNum: number = page,
-    pageSizeNum: number = pageSize,
-    searchQuery?: string,
-    filterCategoryId?: number,
-    filterTagId?: number,
-    filterFileType?: string
-  ) => {
-    setIsLoading(true)
-    setError(null)
-    try {
-      const response = await apiClient.getMediaList(
-        pageNum,
-        pageSizeNum,
-        searchQuery,
-        filterCategoryId,
-        filterTagId,
-        filterFileType
-      )
-      if (response.code === 200) {
-        setMediaList(response.data)
-      } else {
-        setError(response.message)
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '获取媒体文件列表失败')
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    fetchMediaList(page, pageSize, search, categoryId, tagId, fileType)
-  }, [page, pageSize, search, categoryId, tagId, fileType])
-
-  return {
-    mediaList,
-    isLoading,
-    error,
-    refetch: fetchMediaList
-  }
-}
-
-export function useMedia(id: number) {
-  const [media, setMedia] = useState<MediaFile | null>(null)
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const fetchMedia = async () => {
-    if (!id) return
-
-    setIsLoading(true)
-    setError(null)
-    try {
-      const response = await apiClient.getMedia(id)
-      if (response.code === 200) {
-        setMedia(response.data)
-      } else {
-        setError(response.message)
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '获取媒体文件详情失败')
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  const updateMedia = async (data: UpdateMediaData) => {
-    if (!id) return { success: false, message: '媒体文件ID不存在' }
-
-    setIsLoading(true)
-    setError(null)
-    try {
-      const response = await apiClient.updateMedia(id, data)
-      if (response.code === 200) {
-        setMedia(response.data)
-        return { success: true, data: response.data }
-      } else {
-        setError(response.message)
-        return { success: false, message: response.message }
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : '更新媒体文件失败'
-      setError(message)
-      return { success: false, message }
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  const deleteMedia = async () => {
-    if (!id) return { success: false, message: '媒体文件ID不存在' }
-
-    setIsLoading(true)
-    setError(null)
-    try {
-      const response = await apiClient.deleteMedia(id)
-      if (response.code === 200) {
-        return { success: true }
-      } else {
-        setError(response.message)
-        return { success: false, message: response.message }
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : '删除媒体文件失败'
-      setError(message)
-      return { success: false, message }
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  const addCategories = async (data: AddCategoriesData) => {
-    if (!id) return { success: false, message: '媒体文件ID不存在' }
-
-    setIsLoading(true)
-    setError(null)
-    try {
-      const response = await apiClient.addCategoriesToMedia(id, data)
-      if (response.code === 200) {
-        // 重新获取媒体信息以更新分类和标签
-        await fetchMedia()
-        return { success: true }
-      } else {
-        setError(response.message)
-        return { success: false, message: response.message }
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : '添加分类失败'
-      setError(message)
-      return { success: false, message }
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  const removeCategories = async (data: RemoveCategoriesData) => {
-    if (!id) return { success: false, message: '媒体文件ID不存在' }
-
-    setIsLoading(true)
-    setError(null)
-    try {
-      const response = await apiClient.removeCategoriesFromMedia(id, data)
-      if (response.code === 200) {
-        // 重新获取媒体信息以更新分类和标签
-        await fetchMedia()
-        return { success: true }
-      } else {
-        setError(response.message)
-        return { success: false, message: response.message }
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : '移除分类失败'
-      setError(message)
-      return { success: false, message }
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  const addTags = async (data: AddTagsData) => {
-    if (!id) return { success: false, message: '媒体文件ID不存在' }
-
-    setIsLoading(true)
-    setError(null)
-    try {
-      const response = await apiClient.addTagsToMedia(id, data)
-      if (response.code === 200) {
-        // 重新获取媒体信息以更新分类和标签
-        await fetchMedia()
-        return { success: true }
-      } else {
-        setError(response.message)
-        return { success: false, message: response.message }
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : '添加标签失败'
-      setError(message)
-      return { success: false, message }
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  const removeTags = async (data: RemoveTagsData) => {
-    if (!id) return { success: false, message: '媒体文件ID不存在' }
-
-    setIsLoading(true)
-    setError(null)
-    try {
-      const response = await apiClient.removeTagsFromMedia(id, data)
-      if (response.code === 200) {
-        // 重新获取媒体信息以更新分类和标签
-        await fetchMedia()
-        return { success: true }
-      } else {
-        setError(response.message)
-        return { success: false, message: response.message }
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : '移除标签失败'
-      setError(message)
-      return { success: false, message }
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    fetchMedia()
-  }, [id])
+  const hasMore = media.length < total;
 
   return {
     media,
-    isLoading,
+    loading,
     error,
-    refetch: fetchMedia,
-    updateMedia,
-    deleteMedia,
-    addCategories,
-    removeCategories,
-    addTags,
-    removeTags
-  }
+    total,
+    refresh,
+    loadMore,
+    hasMore,
+  };
 }
 
-export function useMediaUpload() {
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [progress, setProgress] = useState(0)
-  const [currentFileIndex, setCurrentFileIndex] = useState(0)
-  const [totalFiles, setTotalFiles] = useState(0)
+/**
+ * 单个媒体详情 Hook
+ */
+export function useMediaDetail(mediaId: number | null) {
+  const [media, setMedia] = useState<Media | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const uploadMedia = async (data: UploadMediaData) => {
-    setIsLoading(true)
-    setError(null)
-
-    try {
-      const response = await apiClient.uploadMedia(data)
-
-      if (response.code === 200 || response.code === 201) {
-        return { success: true, data: response.data }
-      } else {
-        setError(response.message)
-        return { success: false, message: response.message }
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : '上传媒体文件失败'
-      setError(message)
-      return { success: false, message }
+  useEffect(() => {
+    if (!mediaId) {
+      setMedia(null);
+      return;
     }
-  }
 
-  // 新增：批量上传方法，支持进度显示
-  const uploadMultipleMedia = async (files: File[], generateUploadData: (file: File, index: number) => UploadMediaData) => {
-    setIsLoading(true)
-    setError(null)
-    setProgress(0)
-    setTotalFiles(files.length)
-
-    let successCount = 0
-    let failureCount = 0
-
-    for (let i = 0; i < files.length; i++) {
-      setCurrentFileIndex(i + 1)
-      const file = files[i]
-      const uploadData = generateUploadData(file, i)
-
-      console.log(`Uploading file ${i + 1}/${files.length}:`, file.name)
+    const loadDetail = async () => {
+      setLoading(true);
+      setError(null);
 
       try {
-        const response = await apiClient.uploadMedia(uploadData)
-        if (response.code === 200 || response.code === 201) {
-          successCount++
+        const response = await mediaApi.getMedia(mediaId);
+        if (response.code === 200) {
+          setMedia(response.data);
         } else {
-          failureCount++
-          setError(response.message)
+          setError(response.message || '加载失败');
         }
       } catch (err) {
-        failureCount++
-        const message = err instanceof Error ? err.message : '上传媒体文件失败'
-        setError(message)
+        setError(err instanceof Error ? err.message : '网络错误');
+      } finally {
+        setLoading(false);
       }
+    };
 
-      // 更新进度
-      const currentProgress = Math.round(((i + 1) / files.length) * 100)
-      setProgress(currentProgress)
-    }
+    loadDetail();
+  }, [mediaId]);
 
-    // 重置状态
-    setIsLoading(false)
-    setCurrentFileIndex(0)
-    setTotalFiles(0)
-
-    return {
-      successCount,
-      failureCount,
-      totalFiles: files.length
-    }
-  }
-
-  // 手动重置进度的方法
-  const resetProgress = () => {
-    setProgress(0)
-    setCurrentFileIndex(0)
-    setTotalFiles(0)
-    setError(null)
-  }
-
-  return {
-    uploadMedia,
-    uploadMultipleMedia,
-    isLoading,
-    error,
-    progress,
-    currentFileIndex,
-    totalFiles,
-    resetProgress
-  }
+  return { media, loading, error };
 }

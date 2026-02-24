@@ -1,1 +1,0 @@
-# Commands package for ollama management

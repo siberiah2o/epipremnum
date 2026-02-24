@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
+import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -20,27 +21,16 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-1i2xtgf+#k@om4ar+9f!#x$@6b7f^1h4)mnpodio8&6bd5+8sw'
+# 生产环境必须通过环境变量设置 SECRET_KEY
+SECRET_KEY = os.environ.get(
+    'DJANGO_SECRET_KEY',
+    'django-insecure-69efa8@yb(z^w+5$ltjwpedqm_-5gj%@^u209hizv_7_j!zq^*'  # 仅用于开发环境
+)
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.environ.get('DJANGO_DEBUG', 'True').lower() in ('true', '1', 'yes')
 
-ALLOWED_HOSTS = ['*']
-
-# Custom User Model
-AUTH_USER_MODEL = 'users.User'
-
-# CORS settings
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "http://192.168.55.133:3000",
-    "http://localhost:8080",
-    "http://127.0.0.1:8080",
-    "http://192.168.55.133:8080",
-]
-CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOW_ALL_ORIGINS = DEBUG  # Only in development
+ALLOWED_HOSTS = os.environ.get('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
 
 # Application definition
@@ -54,27 +44,24 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'rest_framework_simplejwt',
-    'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
+    'django_filters',
+    'django_q',
+    'channels',
     'users',
     'media',
-    'ollama',  # 添加 ollama 应用
-    'endpoint',  # 添加 endpoint 应用
-    'workflow',  # 添加 workflow 应用（从ollama.tasks迁移过来）
-    'django_async_manager',
-    'utils',  # 添加工具包应用
+    'llm',
+    'projects',
 ]
 
 MIDDLEWARE = [
-    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
-    'utils.middleware.DatabaseOptimizationMiddleware',  # 数据库优化中间件
+    'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
-    # 'django.middleware.csrf.CsrfViewMiddleware',  # 注释掉 CSRF 中间件，适用于纯 API
+    'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
-    'utils.middleware.DatabaseHealthMiddleware',  # 数据库健康监控中间件
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
@@ -104,15 +91,36 @@ WSGI_APPLICATION = 'backend.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'NAME': BASE_DIR / 'epipremnum.sqlite3',
+        # SQLite 并发优化配置
         'OPTIONS': {
-            'timeout': 120,  # 增加到120秒超时
-            'check_same_thread': False,
-            # 针对高并发优化的SQLite配置
-            'init_command': "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA cache_size=-512000; PRAGMA temp_store=memory; PRAGMA busy_timeout=30000; PRAGMA wal_autocheckpoint=200; PRAGMA mmap_size=1073741824; PRAGMA locking_mode=NORMAL; PRAGMA auto_vacuum=INCREMENTAL; PRAGMA journal_size_limit=268435456; PRAGMA wal_checkpoint_mode=RESTART; PRAGMA page_size=4096; PRAGMA foreign_keys=ON; PRAGMA query_only=OFF;",
-        }
+            # 设置数据库锁等待超时（秒），默认5秒太短
+            'timeout': 30,
+        },
+        # 保持连接，减少频繁开关连接的开销
+        'CONN_MAX_AGE': 60,
     }
 }
+
+# SQLite PRAGMA 配置 - 在每个连接建立时执行
+# 注意：WAL 模式需要在数据库创建后手动执行或通过 migration 设置
+def configure_sqlite_pragma(sender, connection, **kwargs):
+    """配置 SQLite PRAGMA 设置以优化并发性能"""
+    if connection.vendor == 'sqlite':
+        cursor = connection.cursor()
+        # 启用 WAL 模式（Write-Ahead Logging）- 允许并发读写
+        cursor.execute('PRAGMA journal_mode=WAL;')
+        # 设置 busy_timeout（毫秒）- 等待锁释放的最长时间
+        cursor.execute('PRAGMA busy_timeout=30000;')
+        # 启用外键约束
+        cursor.execute('PRAGMA foreign_keys=ON;')
+        # 同步模式设置（NORMAL 在 WAL 模式下是安全的，性能更好）
+        cursor.execute('PRAGMA synchronous=NORMAL;')
+        # 缓存大小（负数表示 KB，这里是 64MB）
+        cursor.execute('PRAGMA cache_size=-64000;')
+
+from django.db.backends.signals import connection_created
+connection_created.connect(configure_sqlite_pragma)
 
 
 # Password validation
@@ -124,6 +132,9 @@ AUTH_PASSWORD_VALIDATORS = [
     },
     {
         'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
+        'OPTIONS': {
+            'min_length': 8,
+        }
     },
     {
         'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
@@ -137,9 +148,9 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/5.2/topics/i18n/
 
-LANGUAGE_CODE = 'en-us'
+LANGUAGE_CODE = 'zh-hans'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Asia/Shanghai'
 
 USE_I18N = True
 
@@ -150,80 +161,143 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = 'static/'
+MEDIA_URL = '/upload/'
+MEDIA_ROOT = BASE_DIR / 'upload'
 
-# Media files (Images, Videos)
-MEDIA_URL = 'media/'
-MEDIA_ROOT = BASE_DIR / 'media'
+# File upload settings
+DATA_UPLOAD_MAX_MEMORY_SIZE = 50 * 1024 * 1024  # 50MB
+FILE_UPLOAD_MAX_MEMORY_SIZE = 50 * 1024 * 1024  # 50MB
+DATA_UPLOAD_MAX_NUMBER_FIELDS = 1000
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# Django REST Framework settings
+
+# DRF settings
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),
-    'DEFAULT_PERMISSION_CLASSES': [
+    'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
-    ],
-    'DEFAULT_RENDERER_CLASSES': [
+    ),
+    'DEFAULT_RENDERER_CLASSES': (
         'rest_framework.renderers.JSONRenderer',
-    ],
-    'DEFAULT_PARSER_CLASSES': [
+    ),
+    'DEFAULT_PARSER_CLASSES': (
         'rest_framework.parsers.JSONParser',
-        'rest_framework.parsers.MultiPartParser',
         'rest_framework.parsers.FormParser',
-    ],
-    'EXCEPTION_HANDLER': 'users.exceptions.custom_exception_handler',
+        'rest_framework.parsers.MultiPartParser',
+    ),
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 20,
+    'DEFAULT_FILTER_BACKENDS': (
+        'rest_framework.filters.SearchFilter',
+        'rest_framework.filters.OrderingFilter',
+    ),
+    'SEARCH_PARAM': 'search',
+    'ORDERING_PARAM': 'ordering',
+    'DEFAULT_THROTTLE_CLASSES': (
+        'rest_framework.throttling.AnonRateThrottle',
+        'rest_framework.throttling.UserRateThrottle',
+    ),
+    'DEFAULT_THROTTLE_RATES': {
+        'anon': '100/day',
+        'user': '1000/day',
+    },
+    'EXCEPTION_HANDLER': 'utils.exceptions.custom_exception_handler',
+    'TEST_REQUEST_RENDERER_CLASSES': (
+        'rest_framework.renderers.JSONRenderer',
+    ),
+    'TEST_REQUEST_DEFAULT_FORMAT': 'json',
 }
+
 
 # JWT settings
 from datetime import timedelta
 
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(days=30),  # Access token 有效期改为30天
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=90),  # Refresh token 有效期改为90天
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
-    'UPDATE_LAST_LOGIN': True,
     'ALGORITHM': 'HS256',
     'SIGNING_KEY': SECRET_KEY,
-    'VERIFYING_KEY': None,
-    'AUDIENCE': None,
-    'ISSUER': None,
     'AUTH_HEADER_TYPES': ('Bearer',),
-    'AUTH_HEADER_NAME': 'HTTP_AUTHORIZATION',
-    'USER_ID_FIELD': 'id',
-    'USER_ID_CLAIM': 'user_id',
-    'AUTH_TOKEN_CLASSES': ('rest_framework_simplejwt.tokens.AccessToken',),
-    'TOKEN_TYPE_CLAIM': 'token_type',
 }
 
-# Django Async Manager Configuration - 优化为高并发SQLite
-ASYNC_MANAGER = {
-    'MAX_WORKERS': 6,  # 增加到6个工作线程，充分利用WAL并发能力
-    'QUEUE_TIMEOUT': 120,  # 减少队列超时，提高响应速度
-    'TASK_TIMEOUT': 300,  # 5分钟任务超时
-    'MAX_RETRIES': 3,  # 增加重试次数，配合自动重试机制
-    'RETRY_DELAY': 5,  # 减少重试延迟，毫秒级重试由数据库层处理
-    'ENABLE_SCHEDULER': True,  # 启用定时任务调度器
-    'BATCH_SIZE': 10,  # 批处理大小
-    'PRESERVE_FRESHNESS': 30.0,  # 连接新鲜度30秒
+
+# Custom User Model
+AUTH_USER_MODEL = 'users.User'
+
+
+# CORS settings
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+
+CORS_ALLOW_CREDENTIALS = True
+
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+]
+
+CORS_ALLOW_METHODS = [
+    'DELETE',
+    'GET',
+    'OPTIONS',
+    'PATCH',
+    'POST',
+    'PUT',
+]
+
+
+# Django Q2 settings - 使用数据库作为 broker，无需 Redis/MQ
+# 注意：SQLite 在高并发写入时容易锁死，需要优化配置
+Q_CLUSTER = {
+    'name': 'epipremnum',
+    'workers': 2,  # SQLite 并发写入能力有限，2个worker是安全的选择
+    'timeout': 120,  # 任务超时时间（秒）
+    'retry': 360,  # 失败重试间隔（秒）
+    'queue_limit': 50,  # 队列最大任务数
+    'bulk': 5,  # 批量处理任务数，减少并发
+    'orm': 'default',
+    'sync': False,
+    'save_limit': 100,  # 减少保存的成功任务数，降低数据库写入压力
+    'cpu_affinity': 1,
+    # 添加重试配置，处理偶发的数据库锁
+    'max_attempts': 3,  # 任务最大重试次数
 }
 
-# Logging Configuration
+# Channels settings
+# 开发环境使用内存后端，生产环境建议使用 channels_redis
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels.layers.InMemoryChannelLayer',
+    },
+}
+
+ASGI_APPLICATION = 'backend.asgi.application'
+
+
+# Logging settings
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
     'formatters': {
         'verbose': {
-            'format': '{levelname} {asctime} {module}:{lineno} {threadName} {message}',
-            'style': '{',
-        },
-        'detailed': {
-            'format': '{levelname} {asctime} {name}:{funcName}:{lineno} [{process}:{thread}] {message}',
+            'format': '{asctime} [{levelname}] {name}: {message}',
             'style': '{',
         },
         'simple': {
@@ -234,70 +308,18 @@ LOGGING = {
     'handlers': {
         'console': {
             'class': 'logging.StreamHandler',
-            'formatter': 'detailed',
+            'formatter': 'verbose',
         },
-    },
-    'root': {
-        'handlers': ['console'],
-        'level': 'INFO',
     },
     'loggers': {
-        'llms': {
-            'handlers': ['console'],
-            'level': 'INFO',  # 降低到INFO级别减少日志量
-            'propagate': False,
-        },
-        'django_async_manager': {
+        'llm': {
             'handlers': ['console'],
             'level': 'INFO',
             'propagate': False,
         },
-        'utils.db_utils': {
+        'django': {
             'handlers': ['console'],
             'level': 'INFO',
-            'propagate': False,
-        },
-        'utils.middleware': {
-            'handlers': ['console'],
-            'level': 'INFO',
-            'propagate': False,
-        },
-        'ollama': {
-            'handlers': ['console'],
-            'level': 'DEBUG',
-            'propagate': False,
-        },
-        'ollama.tasks.state_manager': {
-            'handlers': ['console'],
-            'level': 'DEBUG',
-            'propagate': False,
-        },
-        'ollama.tasks.ollama_client': {
-            'handlers': ['console'],
-            'level': 'DEBUG',
-            'propagate': False,
-        },
-        'workflow': {
-            'handlers': ['console'],
-            'level': 'DEBUG',
-            'propagate': False,
-        },
-        'workflow.state_manager': {
-            'handlers': ['console'],
-            'level': 'DEBUG',
-            'propagate': False,
-        },
-        'workflow.ollama_client': {
-            'handlers': ['console'],
-            'level': 'DEBUG',
-            'propagate': False,
         },
     },
 }
-
-
-
-# Ollama并发控制配置
-OLLAMA_DEFAULT_CONCURRENT = 3  # 默认并发数
-OLLAMA_GLOBAL_MAX_CONCURRENT = 10  # 全局最大并发数
-OLLAMA_ANALYSIS_TIMEOUT = 300  # 单个分析任务超时时间（秒）

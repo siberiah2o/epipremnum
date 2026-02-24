@@ -1,0 +1,77 @@
+# ========================================
+# Backend (Django/Python)
+# ========================================
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environment
+venv/
+.venv/
+env/
+ENV/
+
+# Django database
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+
+# Django media uploads (保留文件夹，排除内容)
+backend/upload/*
+!backend/upload/.gitkeep
+
+# Python cache
+.pytest_cache/
+.mypy_cache/
+
+# ========================================
+# Frontend (Next.js/Node)
+# ========================================
+
+# Dependencies
+node_modules/
+
+# Next.js build
+.next/
+out/
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# ========================================
+# Environment & Secrets
+# ========================================
+
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# ========================================
+# IDE & Editor
+# ========================================
+
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ========================================
+# OS Generated
+# ========================================
+
+.DS_Store
+Thumbs.db
+
+# ========================================
+# Logs & Cache
+# ========================================
+
+*.log
+logs/
+.ruff_cache/

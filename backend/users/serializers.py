@@ -1,85 +1,88 @@
 from rest_framework import serializers
-from django.contrib.auth import authenticate
+from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
-from .models import User
-from .constants import ErrorMessages
+
+User = get_user_model()
 
 
-class UserRegistrationSerializer(serializers.ModelSerializer):
-    """用户注册序列化器"""
-    password = serializers.CharField(
-        write_only=True,
-        validators=[validate_password],
-        min_length=8,
-        error_messages={
-            'min_length': ErrorMessages.PASSWORD_TOO_WEAK
-        }
-    )
-    password_confirm = serializers.CharField(write_only=True)
+class UserSerializer(serializers.ModelSerializer):
+    """用户序列化器"""
+    avatar_url = serializers.SerializerMethodField(read_only=True, allow_null=True)
 
     class Meta:
         model = User
-        fields = ('username', 'email', 'password', 'password_confirm', 'phone')
+        fields = ['id', 'email', 'username', 'phone', 'avatar', 'avatar_url', 'date_joined', 'last_login']
+        read_only_fields = ['id', 'date_joined', 'last_login']
 
-    def validate_email(self, value):
-        """验证邮箱是否已存在"""
-        if User.objects.filter(email=value).exists():
-            raise serializers.ValidationError(ErrorMessages.EMAIL_ALREADY_EXISTS)
-        return value
+    def get_avatar_url(self, obj):
+        """安全地获取头像 URL"""
+        try:
+            return obj.avatar.url if obj.avatar else None
+        except (AttributeError, ValueError):
+            return None
+
+
+class AvatarUploadSerializer(serializers.Serializer):
+    """头像上传序列化器"""
+    avatar = serializers.ImageField(required=True, help_text='头像图片文件')
+
+
+class RegisterSerializer(serializers.ModelSerializer):
+    """注册序列化器"""
+
+    password_confirm = serializers.CharField(write_only=True, required=True)
+
+    class Meta:
+        model = User
+        fields = ['email', 'username', 'password', 'password_confirm', 'phone']
+        extra_kwargs = {
+            'password': {'write_only': True, 'validators': [validate_password]},
+        }
 
     def validate(self, attrs):
-        """验证两次密码是否一致"""
         if attrs['password'] != attrs['password_confirm']:
-            raise serializers.ValidationError({'password_confirm': ErrorMessages.PASSWORD_INCORRECT})
+            raise serializers.ValidationError({'password_confirm': '两次输入的密码不一致'})
         return attrs
 
     def create(self, validated_data):
-        """创建用户"""
         validated_data.pop('password_confirm')
         user = User.objects.create_user(**validated_data)
         return user
 
 
-class UserLoginSerializer(serializers.Serializer):
-    """用户登录序列化器"""
-    email = serializers.EmailField()
-    password = serializers.CharField(write_only=True)
+class LoginSerializer(serializers.Serializer):
+    """登录序列化器"""
+
+    email = serializers.EmailField(required=True)
+    password = serializers.CharField(required=True, write_only=True)
+
+
+class UpdatePasswordSerializer(serializers.Serializer):
+    """修改密码序列化器"""
+
+    old_password = serializers.CharField(required=True, write_only=True)
+    new_password = serializers.CharField(required=True, write_only=True, validators=[validate_password])
+    new_password_confirm = serializers.CharField(required=True, write_only=True)
 
     def validate(self, attrs):
-        """验证用户凭据"""
-        email = attrs.get('email')
-        password = attrs.get('password')
+        if attrs['new_password'] != attrs['new_password_confirm']:
+            raise serializers.ValidationError({'new_password_confirm': '两次输入的密码不一致'})
+        return attrs
 
-        if email and password:
-            user = authenticate(
-                request=self.context.get('request'),
-                username=email,
-                password=password
-            )
-
-            if not user:
-                raise serializers.ValidationError(ErrorMessages.INVALID_CREDENTIALS)
-
-            if not user.is_active:
-                raise serializers.ValidationError(ErrorMessages.USER_NOT_FOUND)
-
-            attrs['user'] = user
-            return attrs
-        else:
-            raise serializers.ValidationError(ErrorMessages.BAD_REQUEST)
+    def validate_old_password(self, value):
+        user = self.context['request'].user
+        if not user.check_password(value):
+            raise serializers.ValidationError('原密码错误')
+        return value
 
 
-class UserProfileSerializer(serializers.ModelSerializer):
-    """用户资料序列化器"""
+class ProfileUpdateSerializer(serializers.ModelSerializer):
+    """用户资料更新序列化器"""
+
     class Meta:
         model = User
-        fields = ('id', 'username', 'email', 'phone', 'avatar', 'created_at', 'updated_at')
-        read_only_fields = ('id', 'email', 'created_at', 'updated_at')
-
-
-class UserSerializer(serializers.ModelSerializer):
-    """基础用户序列化器"""
-    class Meta:
-        model = User
-        fields = ('id', 'username', 'email', 'avatar')
-        read_only_fields = ('id', 'email')
+        fields = ['username', 'phone']
+        extra_kwargs = {
+            'username': {'required': False},
+            'phone': {'required': False},
+        }

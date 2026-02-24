@@ -1,63 +1,62 @@
+"""
+Django management command: 为现有媒体文件生成缩略图
+使用方法: python manage.py generate_thumbnails
+"""
+
 from django.core.management.base import BaseCommand
-from django.db import models
 from media.models import Media
+from media.serializers import generate_thumbnail
 
 
 class Command(BaseCommand):
-    help = '为现有的媒体文件生成缩略图'
+    help = '为所有没有缩略图的图片生成缩略图'
 
     def add_arguments(self, parser):
         parser.add_argument(
             '--overwrite',
             action='store_true',
+            dest='overwrite',
             help='覆盖已存在的缩略图',
         )
 
     def handle(self, *args, **options):
-        overwrite = options['overwrite']
+        overwrite = options.get('overwrite', False)
 
-        # 查询所有需要生成缩略图的媒体文件
-        if overwrite:
-            media_files = Media.objects.all()
-            self.stdout.write('为所有媒体文件生成缩略图（包括已有缩略图的）...')
-        else:
-            # 检查 thumbnail 字段是否为空
-            media_files = Media.objects.filter(
-                models.Q(thumbnail__isnull=True) | models.Q(thumbnail='')
-            )
-            self.stdout.write('为没有缩略图的媒体文件生成缩略图...')
+        # 获取所有图片类型的媒体文件
+        queryset = Media.objects.filter(type='image')
 
-        total_count = media_files.count()
-        if total_count == 0:
-            self.stdout.write(self.style.SUCCESS('没有需要处理的媒体文件'))
+        if not overwrite:
+            # 只处理没有缩略图的
+            queryset = queryset.filter(thumbnail__isnull=True)
+
+        total = queryset.count()
+        if total == 0:
+            self.stdout.write(self.style.WARNING('没有需要处理的图片'))
             return
 
+        self.stdout.write(f'开始处理 {total} 张图片...')
+
         success_count = 0
-        error_count = 0
+        failed_count = 0
 
-        for i, media in enumerate(media_files, 1):
+        for media in queryset:
             try:
-                self.stdout.write(f'处理 ({i}/{total_count}): {media.title or media.file.name}')
+                if overwrite and media.thumbnail:
+                    # 删除旧缩略图
+                    media.thumbnail.delete(save=False)
 
-                # 生成缩略图 - 直接调用方法不触发信号
-                media.generate_thumbnail()
-                # 只更新缩略图字段，不触发 save 信号
-                Media.objects.filter(pk=media.pk).update(thumbnail=media.thumbnail)
+                # 生成新缩略图
+                thumbnail = generate_thumbnail(media.file)
+                media.thumbnail.save(thumbnail.name, thumbnail, save=True)
 
-                self.stdout.write(f'✓ 成功生成缩略图: {media.title}')
                 success_count += 1
-
+                self.stdout.write(f'  ✓ {media.filename}', ending='\n')
             except Exception as e:
+                failed_count += 1
                 self.stdout.write(
-                    self.style.ERROR(f'✗ 生成缩略图失败 {media.title}: {str(e)}')
+                    self.style.ERROR(f'  ✗ {media.filename}: {str(e)}'),
+                    ending='\n'
                 )
-                error_count += 1
 
-        # 输出结果统计
         self.stdout.write('\n' + '='*50)
-        self.stdout.write(f'处理完成！')
-        self.stdout.write(f'总计: {total_count} 个文件')
-        self.stdout.write(self.style.SUCCESS(f'成功: {success_count} 个文件'))
-        if error_count > 0:
-            self.stdout.write(self.style.ERROR(f'失败: {error_count} 个文件'))
-        self.stdout.write('='*50)
+        self.stdout.write(self.style.SUCCESS(f'完成！成功: {success_count}, 失败: {failed_count}'))
